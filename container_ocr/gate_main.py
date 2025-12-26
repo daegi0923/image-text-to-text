@@ -71,12 +71,13 @@ class GateSystem:
     def __init__(self):
         ensure_dirs()
         logging.info(">>> 시스템 초기화 중...")
-        
-        try:
-            self.yolo = YOLO('yolo11n.pt') 
-        except:
-            self.yolo = YOLO('yolov8n.pt')
-            
+        my_model_path = 'outputs/yolo_container_ocr/weights/best.pt' 
+        if os.path.exists(my_model_path):
+            logging.info(f"학습된 커스텀 모델 로드 중: {my_model_path}")
+            self.yolo = YOLO(my_model_path)
+        else:
+            logging.warning("커스텀 모델을 찾을 수 없어 기본 모델(yolo11n.pt)을 사용합니다.")
+            self.yolo = YOLO('yolo11n.pt')             
         logging.info("Qwen3-VL OCR 모델 로딩...")
         self.ocr_engine = ContainerOCR()
         
