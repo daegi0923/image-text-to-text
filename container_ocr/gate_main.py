@@ -13,7 +13,6 @@ from container_ocr import ContainerOCR
 # =================================================================================================
 
 VIDEO_PATH = 'videos/gate_side1.mp4'
-ROI_RECT = (338, 174, 214, 282) 
 
 OUTPUT_DIR = 'outputs'
 TEMP_FRAME_DIR = 'temp_frames'
@@ -94,7 +93,6 @@ class GateSystem:
             logging.error(f"영상을 열 수 없습니다: {VIDEO_PATH}")
             return
 
-        rx, ry, rw, rh = ROI_RECT
         frame_idx = 0
         
         logging.info(">>> 전체 화면 모니터링 시작")
@@ -112,53 +110,61 @@ class GateSystem:
             # 1. YOLO 감지
             results = self.yolo(frame, conf=CONF_THRESHOLD, verbose=False)
             
-            is_in_roi = False
+            # 가장 신뢰도 높은 박스 하나만 선택 (여러 개일 경우)
+            best_box = None
+            max_conf = 0
+            
             for r in results:
                 for box in r.boxes:
-                    x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-                    
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    if rx < cx < rx + rw and ry < cy < ry + rh:
-                        is_in_roi = True
+                    conf = float(box.conf[0])
+                    if conf > max_conf:
+                        max_conf = conf
+                        best_box = box
 
-            # 2. ROI 및 보정 미리보기 시각화
-            cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), (0, 255, 0), 2)
-            
-            # 3. OCR 로직
-            if is_in_roi and self.cooldown_counter == 0:
-                roi_img = frame[ry:ry+rh, rx:rx+rw]
+            # 2. 박스가 있으면 OCR 처리
+            if best_box is not None:
+                x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                 
-                if roi_img.size > 0:
-                    # 동적 강도 적용
-                    corrected_img = apply_perspective_correction(roi_img, intensity=self.perspective_intensity)
+                # 시각화 (빨간 박스)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                
+                if self.cooldown_counter == 0:
+                    # YOLO 박스 영역 Crop
+                    roi_img = frame[y1:y2, x1:x2]
                     
-                    cv2.imwrite(TEMP_ROI_IMG, corrected_img)
-                    
-                    # 미리보기 (보정된 이미지)
-                    preview = cv2.resize(corrected_img, (150, 200))
-                    frame[0:200, 0:150] = preview
-                    cv2.putText(frame, f"Intensity: {self.perspective_intensity:.2f}", (5, 190), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                    if roi_img.size > 0:
+                        # 동적 강도 적용 (Crop된 이미지에 대해 보정)
+                        corrected_img = apply_perspective_correction(roi_img, intensity=self.perspective_intensity)
+                        
+                        cv2.imwrite(TEMP_ROI_IMG, corrected_img)
+                        
+                        # 미리보기 (보정된 이미지)
+                        try:
+                            preview = cv2.resize(corrected_img, (150, 200))
+                            frame[0:200, 0:150] = preview
+                            cv2.putText(frame, f"Intensity: {self.perspective_intensity:.2f}", (5, 190), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+                        except:
+                            pass # 이미지가 너무 작거나 오류 시 패스
 
-                    # OCR 실행
-                    ocr_result = self.ocr_engine.extract_container_number(TEMP_ROI_IMG)
-                    
-                    if ocr_result['found']:
-                        num = ocr_result['container_number']
-                        if ocr_result.get('check_digit_valid', False):
-                            self.detection_buffer.append(num)
-                            
-                            if len(self.detection_buffer) >= 3:
-                                most_common, count = Counter(self.detection_buffer).most_common(1)[0]
-                                if count >= 3:
-                                    self._save_log(most_common, frame_idx)
-                                    self.cooldown_counter = COOLDOWN_FRAMES
-                                    self.detection_buffer.clear()
-                                    logging.info(f"★ SAVED: {most_common}")
+                        # OCR 실행
+                        ocr_result = self.ocr_engine.extract_container_number(TEMP_ROI_IMG)
+                        
+                        if ocr_result['found']:
+                            num = ocr_result['container_number']
+                            if ocr_result.get('check_digit_valid', False):
+                                self.detection_buffer.append(num)
+                                
+                                if len(self.detection_buffer) >= 3:
+                                    most_common, count = Counter(self.detection_buffer).most_common(1)[0]
+                                    if count >= 3:
+                                        self._save_log(most_common, frame_idx)
+                                        self.cooldown_counter = COOLDOWN_FRAMES
+                                        self.detection_buffer.clear()
+                                        logging.info(f"★ SAVED: {most_common}")
 
-                        cv2.putText(frame, f"Detecting: {num}", (160, 50), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+                            cv2.putText(frame, f"Detecting: {num}", (160, 50), 
+                                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
 
             # 상태 표시
             status = "COOLDOWN" if self.cooldown_counter > 0 else "READY"
