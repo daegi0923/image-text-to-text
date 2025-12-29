@@ -85,7 +85,7 @@ class GateSystem:
         self.detection_buffer = deque(maxlen=5)
         
         # 투시 변환 초기 강도
-        self.perspective_intensity = 0.15
+        self.perspective_intensity = 0.0
         
     def run(self):
         cap = cv2.VideoCapture(VIDEO_PATH)
@@ -125,12 +125,30 @@ class GateSystem:
             if best_box is not None:
                 x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                 
-                # 시각화 (빨간 박스)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                # 중앙 정렬 확인 (가로 1/3 ~ 2/3, 세로 1/4 ~ 3/4)
+                fh, fw = frame.shape[:2]
+                cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                is_centered = (fw * 0.33 < cx < fw * 0.66) and (fh * 0.25 < cy < fh * 0.75)
+
+                # 시각화 (중앙이면 초록, 아니면 빨강)
+                box_color = (0, 255, 0) if is_centered else (0, 0, 255)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
                 
                 if self.cooldown_counter == 0:
-                    # YOLO 박스 영역 Crop
-                    roi_img = frame[y1:y2, x1:x2]
+                    if not is_centered:
+                        cv2.putText(frame, "MOVE TO CENTER", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_color, 2)
+                        roi_img = np.array([]) # 빈 이미지로 설정하여 아래 로직 스킵
+                    else:
+                        # YOLO 박스 영역 Crop (Padding 추가)
+                        pw_pad = int((x2 - x1) * 0.1)  # 가로 10% 패딩
+                        ph_pad = int((y2 - y1) * 0.1)  # 세로 10% 패딩
+                        
+                        px1 = max(0, x1 - pw_pad)
+                        py1 = max(0, y1 - ph_pad)
+                        px2 = min(fw, x2 + pw_pad)
+                        py2 = min(fh, y2 + ph_pad)
+                        
+                        roi_img = frame[py1:py2, px1:px2]
                     
                     if roi_img.size > 0:
                         # 동적 강도 적용 (Crop된 이미지에 대해 보정)
@@ -140,9 +158,18 @@ class GateSystem:
                         
                         # 미리보기 (보정된 이미지)
                         try:
-                            preview = cv2.resize(corrected_img, (150, 200))
-                            frame[0:200, 0:150] = preview
-                            cv2.putText(frame, f"Intensity: {self.perspective_intensity:.2f}", (5, 190), 
+                            # 비율 유지하며 리사이즈
+                            ph, pw = corrected_img.shape[:2]
+                            target_w = 200
+                            target_h = int(target_w * (ph / pw))
+                            
+                            if target_h > 200: # 높이가 너무 크면 높이 기준으로 맞춤
+                                target_h = 200
+                                target_w = int(target_h * (pw / ph))
+                            
+                            preview = cv2.resize(corrected_img, (target_w, target_h))
+                            frame[0:target_h, 0:target_w] = preview
+                            cv2.putText(frame, f"Intensity: {self.perspective_intensity:.2f}", (5, target_h - 10), 
                                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
                         except:
                             pass # 이미지가 너무 작거나 오류 시 패스
