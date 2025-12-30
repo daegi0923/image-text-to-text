@@ -20,7 +20,7 @@ def train():
         epochs=100,        # 학습 반복 횟수
         imgsz=640,         # 이미지 크기
         batch=16,          # 배치 크기
-        device='mps',      # GPU/MPS/CPU 자동 선택 (필요시 변경)
+        device='gpu',      # GPU/MPS/CPU 자동 선택 (필요시 변경)
         patience=20,       # 성능 향상이 없으면 조기 종료
         save=True,         # 체크포인트 저장
         project="outputs", # 저장 경로
