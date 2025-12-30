@@ -1,4 +1,5 @@
 # image-text-to-text
+```
 container-recognition-system/
 ├── configs/                # 설정 (카메라 오프셋, YOLO/OCR 경로, ISO 규칙)
 │   └── settings.yaml
@@ -25,3 +26,4 @@ container-recognition-system/
 │   └── visualizer.py
 ├── main.py                 # 실시간 가동 메인 스크립트
 └── requirements.txt
+```
