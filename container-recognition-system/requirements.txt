@@ -1,0 +1,20 @@
+# Core Deep Learning & Vision
+torch
+transformers
+qwen-vl-utils
+ultralytics
+opencv-python
+pillow
+
+# Hardware Acceleration & Optimization
+accelerate
+bitsandbytes
+
+# Data Handling & Utils
+pandas
+numpy
+tqdm
+
+# Web/API (Optional but often needed for HF models)
+requests
+huggingface-hub

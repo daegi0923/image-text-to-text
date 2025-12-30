@@ -1,0 +1,15 @@
+system:
+  video_path: "data/raw_videos/gate_side2.mp4"
+  output_dir: "outputs"
+  temp_frame_dir: "temp_frames"
+  log_file: "outputs/gate_access_log.csv"
+
+model:
+  yolo_path: "outputs/yolo_container_ocr/weights/best.pt"
+  yolo_default: "models/yolo11n.pt"
+  conf_threshold: 0.5
+  ocr_model: "Qwen/Qwen3-VL-2B-Instruct"
+
+parameters:
+  cooldown_frames: 150
+  perspective_intensity: 0.0
