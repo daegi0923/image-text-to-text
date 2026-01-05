@@ -174,6 +174,7 @@ def main():
                 
             disp_frame = frame.copy()
             unit_name = unit['name']
+            fh, fw = frame.shape[:2] # 여기서 미리 정의
             
             # 쿨다운 아니면 탐지 수행
             if current_state != STATE_COOLDOWN:
@@ -184,7 +185,6 @@ def main():
                     conf = float(best_box.conf[0])
                     x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                     
-                    fh, fw = frame.shape[:2]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                     is_centered = (fw * 0.4 < cx < fw * 0.6) and (fh * 0.25 < cy < fh * 0.75)
                     
