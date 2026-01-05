@@ -1,17 +1,23 @@
 system:
-  video_sources:
-    - "data/raw_videos/gate_side1.mp4"
-    - "data/raw_videos/gate_side2.mp4"
-  video_path: "data/raw_videos/gate_side2.mp4"  # 하위 호환용 유지
+  # 카메라별 설정 (소스 + 전용 모델)
+  cameras:
+    - name: "side_view_1"
+      source: "data/raw_videos/gate_side1.mp4"
+      weights: "outputs/yolo_container_ocr/weights/best.pt" # 사이드뷰 전용 모델
+    - name: "side_view_2"
+      source: "data/raw_videos/gate_side2.mp4"
+      weights: "outputs/yolo_container_ocr2/weights/best.pt" # 탑뷰/다른각도 전용 모델
+  
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
 
 model:
-  yolo_path: "outputs/yolo_container_ocr/weights/best.pt"
-  yolo_default: "models/yolo11n.pt"
+  yolo_default: "yolo11n.pt"
   conf_threshold: 0.5
   ocr_model: "Qwen/Qwen3-VL-2B-Instruct"
 
 parameters:
   cooldown_frames: 150
   perspective_intensity: 0.0
+  collection_window: 60
+

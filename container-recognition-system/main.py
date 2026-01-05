@@ -26,36 +26,60 @@ def main():
     params_conf = config.get('parameters', {})
     
     logger = setup_logger(log_file=system_conf.get('log_file', 'outputs/gate_log.csv'))
-    logger.info("=== 타임 윈도우 기반 멀티 카메라 인식 시스템 시작 ===")
+    logger.info("=== 멀티 모델/멀티 카메라 인식 시스템 시작 ===")
 
-    # 2. 모듈 초기화
-    cameras = []
-    video_sources = system_conf.get('video_sources', [system_conf.get('video_path', 'data/raw_videos/gate_side2.mp4')])
+    # 2. 모듈 초기화 (카메라 + 전담 탐지기 페어링)
+    camera_units = [] # [{'cam': obj, 'detector': obj, 'name': str}, ...]
     
-    if isinstance(video_sources, str):
-        video_sources = [video_sources]
+    camera_configs = system_conf.get('cameras', [])
+    
+    # 하위 호환성 (기존 video_sources 형식이면 변환)
+    if not camera_configs and 'video_sources' in system_conf:
+        default_weights = model_conf.get('yolo_path', 'outputs/yolo_container_ocr/weights/best.pt')
+        for idx, src in enumerate(system_conf['video_sources']):
+            camera_configs.append({
+                'name': f"cam_{idx}",
+                'source': src,
+                'weights': default_weights
+            })
 
     try:
-        for src in video_sources:
-            try:
-                cam = Camera(src)
-                cameras.append(cam)
-                logger.info(f"카메라 연결 성공: {src}")
-            except Exception as e:
-                logger.error(f"카메라 연결 실패 ({src}): {e}")
-
-        if not cameras:
-            logger.error("사용 가능한 카메라가 없습니다. 종료합니다.")
-            return
-
-        detector = ContainerDetector(
-            model_path=model_conf.get('yolo_path', 'outputs/yolo_container_ocr/weights/best.pt'),
-            default_model=model_conf.get('yolo_default', 'yolo11n.pt'),
-            conf_threshold=model_conf.get('conf_threshold', 0.5)
-        )
-        
+        # OCR 워커 (공용)
         ocr_worker = ContainerOCR(model_name=model_conf.get('ocr_model', 'Qwen/Qwen3-VL-2B-Instruct'))
         
+        # 카메라 유닛 생성
+        for conf in camera_configs:
+            name = conf.get('name', 'unknown')
+            src = conf.get('source')
+            weights = conf.get('weights')
+            
+            if not src:
+                continue
+                
+            try:
+                cam = Camera(src)
+                
+                # 전담 탐지기 생성
+                detector = ContainerDetector(
+                    model_path=weights,
+                    default_model=model_conf.get('yolo_default', 'yolo11n.pt'),
+                    conf_threshold=model_conf.get('conf_threshold', 0.5)
+                )
+                
+                camera_units.append({
+                    'cam': cam,
+                    'detector': detector,
+                    'name': name
+                })
+                logger.info(f"✅ 유닛 준비 완료: {name} (Source: {src}, Model: {weights})")
+                
+            except Exception as e:
+                logger.error(f"❌ 유닛 초기화 실패 ({name}): {e}")
+
+        if not camera_units:
+            logger.error("사용 가능한 카메라 유닛이 없습니다. 종료합니다.")
+            return
+
     except Exception as e:
         logger.error(f"시스템 초기화 실패: {e}")
         import traceback
@@ -70,48 +94,50 @@ def main():
     current_state = STATE_IDLE
     
     # 파라미터
-    collection_window = params_conf.get('collection_window', 60) # 수집 기간 (프레임)
-    cooldown_frames = params_conf.get('cooldown_frames', 150)    # 재인식 방지 쿨다운
+    collection_window = params_conf.get('collection_window', 60)
+    cooldown_frames = params_conf.get('cooldown_frames', 150)
     perspective_intensity = params_conf.get('perspective_intensity', 0.0)
     
     state_timer = 0
-    evidence_bucket = [] # 수집된 이미지 정보들 {'path': ..., 'score': ..., 'cam_id': ...}
+    evidence_bucket = [] 
     
     history = []
     frame_idx = 0
     temp_dir = system_conf.get('temp_frame_dir', 'temp_frames')
     os.makedirs(temp_dir, exist_ok=True)
 
-    logger.info(f">>> 모니터링 시작 (수집 윈도우: {collection_window}프레임)")
+    logger.info(f">>> {len(camera_units)}개 유닛 모니터링 시작 (수집 윈도우: {collection_window})")
 
     while True:
         # --- 1. 프레임 수집 ---
-        frames = []
-        for cam in cameras:
-            frame = cam.get_frame()
-            frames.append(frame)
+        active_frames = [] # (frame, unit) 튜플 리스트
+        
+        all_closed = True
+        for unit in camera_units:
+            frame = unit['cam'].get_frame()
+            if frame is not None:
+                active_frames.append((frame, unit))
+                all_closed = False
+            else:
+                active_frames.append((None, unit))
 
-        if all(f is None for f in frames):
+        if all_closed:
             logger.info("모든 영상 소스 종료")
             break
 
         frame_idx += 1
         
-        # 타이머 감소
+        # 타이머 로직 (상태머신)
         if state_timer > 0:
             state_timer -= 1
-            # 수집 종료 -> 판결 모드
+            
+            # 수집 종료 -> 판결
             if current_state == STATE_COLLECTING and state_timer == 0:
                 logger.info(f"🛑 수집 종료! 증거 {len(evidence_bucket)}건 분석 시작...")
                 
                 if evidence_bucket:
-                    # 1. 경로 리스트 추출
                     image_paths = [item['path'] for item in evidence_bucket]
-                    
-                    # 2. 일괄 OCR
                     ocr_results = ocr_worker.process_batch(image_paths)
-                    
-                    # 3. 투표
                     final_verdict = ocr_worker.consolidate_results(ocr_results)
                     
                     if final_verdict['found']:
@@ -130,53 +156,48 @@ def main():
                 else:
                     logger.info("❌ 수집된 증거가 없습니다.")
 
-                # 쿨다운 진입
                 current_state = STATE_COOLDOWN
                 state_timer = cooldown_frames
-                evidence_bucket = [] # 버킷 비우기
+                evidence_bucket = []
             
-            # 쿨다운 종료 -> IDLE
+            # 쿨다운 종료 -> 대기
             elif current_state == STATE_COOLDOWN and state_timer == 0:
                 current_state = STATE_IDLE
                 logger.info("🟢 대기 모드 전환 (IDLE)")
 
-        # --- 2. 탐지 및 수집 ---
+        # --- 2. 유닛별 탐지 및 수집 ---
         display_frames = []
         
-        for i, frame in enumerate(frames):
+        for frame, unit in active_frames:
             if frame is None:
                 continue
                 
             disp_frame = frame.copy()
+            unit_name = unit['name']
             
-            # 쿨다운 중엔 탐지 생략해서 자원 절약 (원하면 켜도 됨)
+            # 쿨다운 아니면 탐지 수행
             if current_state != STATE_COOLDOWN:
-                best_box = detector.detect(frame)
+                # ★ 중요: 각 유닛의 전담 탐지기 사용
+                best_box = unit['detector'].detect(frame)
                 
                 if best_box is not None:
-                    # 좌표 및 점수
                     conf = float(best_box.conf[0])
                     x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                     
-                    # 중앙 정렬 확인
                     fh, fw = frame.shape[:2]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                     is_centered = (fw * 0.4 < cx < fw * 0.6) and (fh * 0.25 < cy < fh * 0.75)
                     
                     Visualizer.draw_detection(disp_frame, best_box, is_centered)
                     
-                    # [로직]
-                    # IDLE 상태에서 중앙 정렬된 컨테이너 발견 -> 수집 모드 시작
+                    # 수집 시작 트리거
                     if current_state == STATE_IDLE and is_centered:
                         current_state = STATE_COLLECTING
                         state_timer = collection_window
-                        logger.info(f"📸 감지됨! 수집 모드 시작 ({collection_window}프레임)")
+                        logger.info(f"📸 {unit_name}에서 감지! 수집 시작")
                     
-                    # COLLECTING 상태에서 좋은 샷(중앙 정렬) 계속 수집
+                    # 수집 중
                     if current_state == STATE_COLLECTING and is_centered:
-                        # 이미 수집된 것 중 현재 카메라의 최고 점수 확인
-                        # (카메라당 너무 많이 수집되면 느려지니 제한을 둘 수도 있음)
-                        
                         # ROI 저장
                         pw_pad = int((x2 - x1) * 0.1)
                         ph_pad = int((y2 - y1) * 0.1)
@@ -189,28 +210,30 @@ def main():
                         roi_pre = preprocess_for_ocr(roi_raw)
                         roi_img = apply_perspective_correction(roi_pre, intensity=perspective_intensity)
                         
-                        file_path = os.path.join(temp_dir, f"cam{i}_f{frame_idx}_{int(time.time()*1000)}.jpg")
+                        file_path = os.path.join(temp_dir, f"{unit_name}_f{frame_idx}_{int(time.time()*1000)}.jpg")
                         cv2.imwrite(file_path, roi_img)
                         
-                        # 증거 추가
                         evidence_bucket.append({
                             'path': file_path,
                             'score': conf,
-                            'cam_id': i
+                            'unit': unit_name
                         })
                         
                         cv2.putText(disp_frame, "COLLECTING", (px1, py1 - 10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 165, 255), 2)
 
+            # 유닛 이름 표시
+            cv2.putText(disp_frame, f"[{unit_name}]", (10, fh - 20), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+                        
             display_frames.append(resize_frame(disp_frame, scale=0.4))
 
-        # --- 3. 화면 병합 및 상태 표시 ---
+        # --- 3. 화면 병합 및 출력 ---
         if display_frames:
             combined_view = np.hstack(display_frames)
             
-            # 상태 텍스트
             status_map = {0: "IDLE", 1: "COLLECTING", 2: "COOLDOWN"}
-            status_color = {0: (0, 255, 0), 1: (0, 165, 255), 2: (0, 0, 255)} # G, Orange, R
+            status_color = {0: (0, 255, 0), 1: (0, 165, 255), 2: (0, 0, 255)}
             
             s_text = f"Status: {status_map[current_state]}"
             if state_timer > 0:
@@ -219,9 +242,8 @@ def main():
             cv2.putText(combined_view, s_text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, status_color[current_state], 2)
             cv2.putText(combined_view, f"Evidence: {len(evidence_bucket)}", (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 1)
 
-            cv2.imshow('Multi-Camera Evidence Collector', combined_view)
+            cv2.imshow('Multi-Model Container Recognition', combined_view)
 
-        # 키 입력
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
@@ -230,8 +252,9 @@ def main():
         elif key == ord('['):
             perspective_intensity = max(0.0, perspective_intensity - 0.01)
 
-    for cam in cameras:
-        cam.release()
+    # 정리
+    for unit in camera_units:
+        unit['cam'].release()
     cv2.destroyAllWindows()
     
     if history:
