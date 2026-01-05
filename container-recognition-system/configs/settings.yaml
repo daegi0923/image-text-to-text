@@ -3,10 +3,10 @@ system:
   cameras:
     - name: "side_view_1"
       source: "data/raw_videos/gate_side1.mp4"
-      weights: "outputs/yolo_container_ocr/weights/best.pt" # 사이드뷰 전용 모델
+      weights: "models/container_side/best.pt" # 사이드뷰 전용 모델
     - name: "side_view_2"
-      source: "data/raw_videos/gate_side2.mp4"
-      weights: "outputs/yolo_container_ocr2/weights/best.pt" # 탑뷰/다른각도 전용 모델
+      source: "data/raw_videos/gate_top1.mp4"
+      weights: "models/container_top/best.pt" # 탑뷰/다른각도 전용 모델
   
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
