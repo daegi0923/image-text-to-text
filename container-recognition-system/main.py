@@ -25,7 +25,7 @@ def main():
     params_conf = config.get('parameters', {})
     
     logger = setup_logger(log_file=system_conf.get('log_file', 'outputs/gate_log.csv'))
-    logger.info("=== 비율 기반 프레임 동기화 시스템 시작 ===")
+    logger.info("=== 커스텀 존 기반 멀티 카메라 인식 시스템 시작 ===")
 
     # 1. 초기화
     camera_units = [] 
@@ -38,6 +38,8 @@ def main():
             name = conf.get('name', 'unknown')
             src = conf.get('source')
             weights = conf.get('weights')
+            zone = conf.get('detection_zone', {'x_min': 0.4, 'x_max': 0.6, 'y_min': 0.25, 'y_max': 0.75})
+            
             if not src: continue
             try:
                 cam = Camera(src)
@@ -48,18 +50,15 @@ def main():
                 )
                 camera_units.append({
                     'cam': cam, 'detector': detector, 'name': name,
-                    'fps': cam.fps,
-                    'acc': 0.0 # 프레임 누적기
+                    'fps': cam.fps, 'acc': 0.0,
+                    'zone': zone # 카메라별 커스텀 존 저장
                 })
-                logger.info(f"✅ 유닛: {name} ({cam.fps:.1f} FPS) | Model: {weights}")
+                logger.info(f"✅ 유닛: {name} ({cam.fps:.1f} FPS) | Zone: {zone}")
             except Exception as e:
                 logger.error(f"❌ 유닛 실패 ({name}): {e}")
 
         if not camera_units: return
-        
-        # 기준이 될 최소 FPS 찾기
         min_fps = min(u['fps'] for u in camera_units)
-        logger.info(f"기준 FPS (최소): {min_fps:.1f}")
 
     except Exception as e:
         logger.error(f"초기화 에러: {e}")
@@ -88,20 +87,16 @@ def main():
         active_frames = []
         all_closed = True
         
-        # --- [핵심] 비율 기반 프레임 읽기 ---
-        # 12fps vs 24fps 상황이라면:
-        # 12fps는 루프당 1장, 24fps는 루프당 2장 읽어서 싱크 맞춤
+        # --- 프레임 읽기 (동기화) ---
         for unit in camera_units:
-            # 루프당 읽어야 할 프레임 수 계산 (예: 24/12 = 2.0)
             unit['acc'] += (unit['fps'] / min_fps)
             num_to_read = int(unit['acc'])
-            unit['acc'] -= num_to_read # 소수점 잔여량 유지 (비정수 FPS 대비)
+            unit['acc'] -= num_to_read
             
             frame = None
             for _ in range(num_to_read):
                 f = unit['cam'].get_frame()
-                if f is not None:
-                    frame = f # 마지막으로 읽은 프레임 사용
+                if f is not None: frame = f
             
             if frame is not None:
                 active_frames.append((frame, unit))
@@ -109,9 +104,7 @@ def main():
             else:
                 active_frames.append((None, unit))
 
-        if all_closed:
-            logger.info("모든 영상 종료")
-            break
+        if all_closed: break
 
         # --- 로직 처리 (상태 머신) ---
         if state_timer > 0:
@@ -130,10 +123,8 @@ def main():
                 current_state = STATE_COOLDOWN
                 state_timer = cooldown_frames
                 evidence_bucket = []
-            
             elif current_state == STATE_COOLDOWN and state_timer == 0:
                 current_state = STATE_IDLE
-                logger.info("🟢 대기 모드 (IDLE)")
 
         # --- 탐지 및 표시 ---
         display_frames = []
@@ -144,13 +135,23 @@ def main():
             
             disp = frame.copy()
             fh, fw = frame.shape[:2]
+            zone = unit['zone']
+            
+            # [시각화] 인식 존 그리기 (옅은 파란색 사각형)
+            zx1, zx2 = int(fw * zone['x_min']), int(fw * zone['x_max'])
+            zy1, zy2 = int(fh * zone['y_min']), int(fh * zone['y_max'])
+            cv2.rectangle(disp, (zx1, zy1), (zx2, zy2), (255, 200, 0), 2)
+            cv2.putText(disp, "Detection Zone", (zx1, zy1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
             
             if current_state != STATE_COOLDOWN:
                 best_box = unit['detector'].detect(frame)
                 if best_box is not None:
                     x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                     cx, cy = (x1+x2)//2, (y1+y2)//2
-                    is_centered = (fw*0.4 < cx < fw*0.6) and (fh*0.25 < cy < fh*0.75)
+                    
+                    # ★ 커스텀 존 체크
+                    is_centered = (zx1 < cx < zx2) and (zy1 < cy < zy2)
+                    
                     Visualizer.draw_detection(disp, best_box, is_centered)
                     
                     if is_centered:
@@ -161,8 +162,9 @@ def main():
                         
                         if current_state == STATE_COLLECTING:
                             path = os.path.join(temp_dir, f"{unit['name']}_{global_step}.jpg")
-                            # 전처리 및 저장
-                            crop = frame[max(0, y1-10):min(fh, y2+10), max(0, x1-10):min(fw, x2+10)].copy()
+                            # ROI 저장 (약간의 패딩 포함)
+                            pad = 20
+                            crop = frame[max(0, y1-pad):min(fh, y2+pad), max(0, x1-pad):min(fw, x2+pad)].copy()
                             cv2.imwrite(path, crop)
                             evidence_bucket.append({'path': path, 'unit': unit['name']})
                             cv2.putText(disp, "COLLECTING", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
@@ -174,7 +176,9 @@ def main():
 
         if display_frames:
             combined = np.hstack(display_frames)
-            cv2.imshow('Sync System (Ratio-based)', combined)
+            status_map = {0: "IDLE", 1: "COLLECTING", 2: "COOLDOWN"}
+            cv2.putText(combined, f"SYSTEM: {status_map[current_state]}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            cv2.imshow('Custom Zones System', combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 

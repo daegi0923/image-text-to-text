@@ -2,11 +2,13 @@ system:
   # 카메라별 설정 (소스 + 전용 모델)
   cameras:
     - name: "side_view_1"
-      source: "data/raw_videos/gate_side2.mp4"
-      weights: "models/container_side/best.pt" # 사이드뷰 전용 모델
+      source: "data/raw_videos/gate_side1.mp4"
+      weights: "outputs/yolo_container_ocr/weights/best.pt"
+      detection_zone: {x_min: 0.4, x_max: 0.6, y_min: 0.25, y_max: 0.75}
     - name: "side_view_2"
       source: "data/raw_videos/gate_top1.mp4"
-      weights: "models/container_top/best.pt" # 탑뷰/다른각도 전용 모델
+      weights: "outputs/yolo_container_ocr2/weights/best.pt"
+      detection_zone: {x_min: 0, x_max: 0.8, y_min: 0.1, y_max: 0.6} # 예시: 위쪽 치우침
   
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
