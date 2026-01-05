@@ -8,11 +8,10 @@ def train():
 
     # 데이터 설정 파일 경로 (프로젝트 루트 기준)
     data_config = "configs/data.yaml"
-    
     if not os.path.exists(data_config):
         print(f"설정 파일을 찾을 수 없습니다: {data_config}")
         return
-
+    print(data_config)
     # 모델 학습
     print("학습 시작...")
     results = model.train(

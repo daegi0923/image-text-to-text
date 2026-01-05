@@ -34,7 +34,8 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
         # 매칭되는 이미지 찾기 (jpg, png 등)
         img_found = None
         for ext in ['.jpg', '.jpeg', '.png']:
-            ip = image_path / (base_name + ext)
+            ip = image_path / (filename_parts[0] + '-' + base_name + ext)
+            print(ip)
             if ip.exists():
                 img_found = ip
                 break
