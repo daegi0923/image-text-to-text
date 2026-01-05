@@ -25,7 +25,7 @@ def main():
     params_conf = config.get('parameters', {})
     
     logger = setup_logger(log_file=system_conf.get('log_file', 'outputs/gate_log.csv'))
-    logger.info("=== 동기화(Sync) 기반 멀티 카메라 시스템 시작 ===")
+    logger.info("=== 배속 제어 기반 멀티 카메라 시스템 시작 ===")
 
     # 1. 초기화
     camera_units = [] 
@@ -38,6 +38,8 @@ def main():
 
     try:
         ocr_worker = ContainerOCR(model_name=model_conf.get('ocr_model', 'Qwen/Qwen3-VL-2B-Instruct'))
+        
+        max_fps = 30.0 # 기준 FPS (가장 높은 놈 기준 or 고정)
         
         for conf in camera_configs:
             name = conf.get('name', 'unknown')
@@ -53,9 +55,9 @@ def main():
                 )
                 camera_units.append({
                     'cam': cam, 'detector': detector, 'name': name,
-                    'fps': cam.fps, # FPS 정보 저장
-                    'last_frame_idx': 0
+                    'fps': cam.fps
                 })
+                if cam.fps > max_fps: max_fps = cam.fps
                 logger.info(f"✅ 유닛: {name} ({cam.fps:.1f} FPS) | Src: {src}")
             except Exception as e:
                 logger.error(f"❌ 유닛 실패 ({name}): {e}")
@@ -82,53 +84,22 @@ def main():
     temp_dir = system_conf.get('temp_frame_dir', 'temp_frames')
     os.makedirs(temp_dir, exist_ok=True)
 
-    # 3. 동기화 변수
-    start_time = time.time()
+    logger.info(f">>> 모니터링 시작 (기준 FPS: {max_fps:.1f})")
+
     global_frame_idx = 0
-
-    logger.info(f">>> 모니터링 시작 (동기화 활성화)")
-
+    
     while True:
-        elapsed_time = time.time() - start_time
+        loop_start = time.time()
         global_frame_idx += 1
         
-        # --- [Sync] 프레임 읽기 ---
+        # --- 프레임 읽기 (단순화: 매 루프마다 1장씩) ---
+        # 서로 FPS가 달라도 그냥 1장씩 읽으면 영상 속도는 달라지지만
+        # 파일 재생에서는 이게 자연스러움 (동시에 끝나는 게 아니라 각자 갈 길 감)
         active_frames = []
         all_closed = True
         
         for unit in camera_units:
-            cam = unit['cam']
-            target_frame_count = int(elapsed_time * unit['fps'])
-            current_frame_pos = unit['last_frame_idx']
-            
-            frame = None
-            
-            # 뒤처진 만큼 빨리 감기 (Skip Frames)
-            # 너무 많이 밀렸으면(5초 이상) 그냥 점프(seek)가 낫지만, 여기선 skip으로 처리
-            frames_to_skip = target_frame_count - current_frame_pos
-            
-            if frames_to_skip > 0:
-                # 마지막 한 장만 디코딩하고 나머지는 버림 (grab)
-                for _ in range(frames_to_skip - 1):
-                    if not cam.cap.grab():
-                        break
-                    unit['last_frame_idx'] += 1
-                
-                # 최종 프레임 읽기
-                ret, frame = cam.cap.read()
-                if ret:
-                    unit['last_frame_idx'] += 1
-                else:
-                    frame = None # 영상 끝남
-            else:
-                # 시간이 안 됐으면 이전 프레임을 그대로 쓰거나 대기해야 함
-                # 하지만 로직 단순화를 위해 그냥 읽고 넘어감 (Over-speed 방지는 sleep으로)
-                # 여기서는 '싱크 맞추기'가 핵심이므로, 너무 빠르면 None 처리해서 스킵해도 됨
-                # 일단은 매 루프마다 읽되, FPS 낮은 애는 같은 프레임 유지하는 게 복잡하니
-                # "최소 1프레임은 읽는다"로 처리 (단순화)
-                 ret, frame = cam.cap.read()
-                 if ret: unit['last_frame_idx'] += 1
-
+            frame = unit['cam'].get_frame()
             if frame is not None:
                 active_frames.append((frame, unit))
                 all_closed = False
@@ -139,13 +110,13 @@ def main():
             logger.info("모든 영상 종료")
             break
 
-        # --- 로직 처리 ---
+        # --- 로직 처리 (상태 머신) ---
         if state_timer > 0:
             state_timer -= 1
+            # 수집 종료 -> 판결
             if current_state == STATE_COLLECTING and state_timer == 0:
                 logger.info(f"🛑 수집 종료 (증거 {len(evidence_bucket)}개)")
                 if evidence_bucket:
-                    # 분석 및 투표
                     image_paths = [e['path'] for e in evidence_bucket]
                     res = ocr_worker.process_batch(image_paths)
                     verdict = ocr_worker.consolidate_results(res)
@@ -168,7 +139,7 @@ def main():
 
         # --- 탐지 및 표시 ---
         display_frames = []
-        any_container_detected_this_frame = False
+        any_container_detected = False
 
         for frame, unit in active_frames:
             if frame is None: continue
@@ -180,7 +151,6 @@ def main():
                 best_box = unit['detector'].detect(frame)
                 
                 if best_box is not None:
-                    conf = float(best_box.conf[0])
                     x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                     cx, cy = (x1+x2)//2, (y1+y2)//2
                     is_centered = (fw*0.4 < cx < fw*0.6) and (fh*0.25 < cy < fh*0.75)
@@ -188,17 +158,16 @@ def main():
                     Visualizer.draw_detection(disp, best_box, is_centered)
                     
                     if is_centered:
-                        any_container_detected_this_frame = True
+                        any_container_detected = True
                         
-                        # [트리거] IDLE -> COLLECTING
                         if current_state == STATE_IDLE:
                             current_state = STATE_COLLECTING
                             state_timer = collection_window
                             logger.info(f"📸 {unit['name']} 감지! 수집 시작")
                         
-                        # [수집] COLLECTING
                         if current_state == STATE_COLLECTING:
-                            # 증거 저장
+                            conf = float(best_box.conf[0])
+                            # ROI 저장
                             pw, ph = int((x2-x1)*0.1), int((y2-y1)*0.1)
                             crop = frame[max(0, y1-ph):min(fh, y2+ph), max(0, x1-pw):min(fw, x2+pw)].copy()
                             pre = preprocess_for_ocr(crop)
@@ -211,10 +180,10 @@ def main():
                             cv2.putText(disp, "COLLECTING", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 165, 255), 2)
 
             display_frames.append(resize_frame(disp, scale=0.4))
-            
-        # [타이머 연장] 누군가 계속 보고 있으면 타이머 리셋 (최대 시간 제한을 두는 것도 방법)
-        if current_state == STATE_COLLECTING and any_container_detected_this_frame:
-            state_timer = collection_window # 타이머를 계속 꽉 채움 (지나갈 때까지)
+
+        # [타이머 연장]
+        if current_state == STATE_COLLECTING and any_container_detected:
+            state_timer = collection_window 
 
         # 화면 출력
         if display_frames:
@@ -223,13 +192,19 @@ def main():
             status_map = {0: "IDLE", 1: "COLLECTING", 2: "COOLDOWN"}
             color_map = {0: (0,255,0), 1: (0,165,255), 2: (0,0,255)}
             
-            cv2.putText(combined, f"{status_map[current_state]} ({state_timer})", (10, 30), 
+            cv2.putText(combined, f"{status_map[current_state]}", (10, 30), 
                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, color_map[current_state], 2)
-            cv2.imshow('Sync Multi-Camera System', combined)
+            cv2.imshow('Multi-Camera System', combined)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'): break
+        # 배속 제어 (WaitKey로 FPS 맞추기)
+        # 루프 처리 시간을 빼고 남은 시간만큼 대기
+        proc_time = time.time() - loop_start
+        wait_ms = max(1, int((1.0/max_fps - proc_time) * 1000))
         
+        # 키 입력 (속도 조절 가능하게)
+        key = cv2.waitKey(wait_ms) & 0xFF
+        if key == ord('q'): break
+
     for unit in camera_units: unit['cam'].release()
     cv2.destroyAllWindows()
     
