@@ -5,10 +5,13 @@ system:
       source: "data/raw_videos/gate_side1.mp4"
       weights: "outputs/yolo_container_ocr/weights/best.pt"
       detection_zone: {x_min: 0.4, x_max: 0.6, y_min: 0.25, y_max: 0.75}
+      target_classes: [0] # 이 카메라는 0번 클래스만 봄
+      
     - name: "side_view_2"
       source: "data/raw_videos/gate_top1.mp4"
       weights: "outputs/yolo_container_ocr2/weights/best.pt"
-      detection_zone: {x_min: 0, x_max: 0.8, y_min: 0.1, y_max: 0.6} # 예시: 위쪽 치우침
+      detection_zone: {x_min: 0.3, x_max: 0.7, y_min: 0.3, y_max: 1}
+      target_classes: [1] # 이 카메라는 0, 1번 둘 다 봄
   
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
@@ -17,6 +20,7 @@ model:
   yolo_default: "yolo11n.pt"
   conf_threshold: 0.5
   ocr_model: "Qwen/Qwen3-VL-2B-Instruct"
+  target_classes: [0, 1] # 0: container_code, 1: container_name (모델 학습 시 설정한 ID 확인 필요)
 
 parameters:
   cooldown_frames: 150

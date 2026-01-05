@@ -13,10 +13,14 @@ class ContainerDetector:
             logging.warning(f"Custom model not found. Using default: {default_model}")
             self.model = YOLO(default_model)
 
-    def detect(self, frame):
+    def detect(self, frame, target_classes=None):
         """
-        프레임에서 컨테이너(또는 객체)를 탐지하고 가장 신뢰도 높은 박스를 반환합니다.
+        프레임에서 특정 클래스의 객체만 탐지하고 가장 신뢰도 높은 박스를 반환합니다.
         
+        Args:
+            frame: 입력 이미지
+            target_classes (list): 탐지할 클래스 ID 리스트 (예: [0, 1]). None이면 모든 클래스 탐지.
+            
         Returns:
             best_box (ultralytics.engine.results.Boxes): 가장 높은 점수의 박스 객체 또는 None
         """
@@ -27,6 +31,12 @@ class ContainerDetector:
         
         for r in results:
             for box in r.boxes:
+                cls_id = int(box.cls[0])
+                
+                # 타겟 클래스 필터링
+                if target_classes is not None and cls_id not in target_classes:
+                    continue
+                
                 conf = float(box.conf[0])
                 if conf > max_conf:
                     max_conf = conf

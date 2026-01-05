@@ -25,11 +25,14 @@ def main():
     params_conf = config.get('parameters', {})
     
     logger = setup_logger(log_file=system_conf.get('log_file', 'outputs/gate_log.csv'))
-    logger.info("=== 커스텀 존 기반 멀티 카메라 인식 시스템 시작 ===")
+    logger.info("=== 커스텀 타겟팅 기반 멀티 카메라 시스템 시작 ===")
 
     # 1. 초기화
     camera_units = [] 
     camera_configs = system_conf.get('cameras', [])
+    
+    # 전역 타겟 클래스 (기본값)
+    global_target_classes = model_conf.get('target_classes', None)
     
     try:
         ocr_worker = ContainerOCR(model_name=model_conf.get('ocr_model', 'Qwen/Qwen3-VL-2B-Instruct'))
@@ -39,6 +42,9 @@ def main():
             src = conf.get('source')
             weights = conf.get('weights')
             zone = conf.get('detection_zone', {'x_min': 0.4, 'x_max': 0.6, 'y_min': 0.25, 'y_max': 0.75})
+            
+            # 카메라별 타겟 클래스 설정 (없으면 전역 설정 사용)
+            target_classes = conf.get('target_classes', global_target_classes)
             
             if not src: continue
             try:
@@ -51,9 +57,10 @@ def main():
                 camera_units.append({
                     'cam': cam, 'detector': detector, 'name': name,
                     'fps': cam.fps, 'acc': 0.0,
-                    'zone': zone # 카메라별 커스텀 존 저장
+                    'zone': zone,
+                    'target_classes': target_classes # 유닛별 타겟 저장
                 })
-                logger.info(f"✅ 유닛: {name} ({cam.fps:.1f} FPS) | Zone: {zone}")
+                logger.info(f"✅ 유닛: {name} | Targets: {target_classes if target_classes else 'ALL'}")
             except Exception as e:
                 logger.error(f"❌ 유닛 실패 ({name}): {e}")
 
@@ -137,32 +144,45 @@ def main():
             fh, fw = frame.shape[:2]
             zone = unit['zone']
             
-            # [시각화] 인식 존 그리기 (옅은 파란색 사각형)
+            # [시각화] 인식 존
             zx1, zx2 = int(fw * zone['x_min']), int(fw * zone['x_max'])
             zy1, zy2 = int(fh * zone['y_min']), int(fh * zone['y_max'])
             cv2.rectangle(disp, (zx1, zy1), (zx2, zy2), (255, 200, 0), 2)
-            cv2.putText(disp, "Detection Zone", (zx1, zy1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
+            cv2.putText(disp, "Zone", (zx1, zy1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 0), 1)
             
             if current_state != STATE_COOLDOWN:
-                best_box = unit['detector'].detect(frame)
+                # ★ 유닛별 타겟 클래스 적용
+                best_box = unit['detector'].detect(frame, target_classes=unit['target_classes'])
+                
                 if best_box is not None:
                     x1, y1, x2, y2 = map(int, best_box.xyxy[0].cpu().numpy())
                     cx, cy = (x1+x2)//2, (y1+y2)//2
                     
-                    # ★ 커스텀 존 체크
+                    # 클래스 이름 추출
+                    cls_id = int(best_box.cls[0])
+                    # names가 딕셔너리인지 리스트인지 확인하고 안전하게 가져오기
+                    names = unit['detector'].model.names
+                    cls_name = names[cls_id] if cls_id in names else str(cls_id)
+                    
+                    # 존 체크
                     is_centered = (zx1 < cx < zx2) and (zy1 < cy < zy2)
                     
+                    # 박스 그리기
                     Visualizer.draw_detection(disp, best_box, is_centered)
+                    
+                    # ★ 화면에 클래스 이름 표시
+                    cv2.putText(disp, f"{cls_name}", (x1, y1-25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
                     
                     if is_centered:
                         any_container_detected = True
                         if current_state == STATE_IDLE:
                             current_state = STATE_COLLECTING
                             state_timer = collection_window
+                            # ★ 로그에 클래스 이름 포함
+                            logger.info(f"📸 {unit['name']} 감지! [{cls_name}] 수집 시작")
                         
                         if current_state == STATE_COLLECTING:
                             path = os.path.join(temp_dir, f"{unit['name']}_{global_step}.jpg")
-                            # ROI 저장 (약간의 패딩 포함)
                             pad = 20
                             crop = frame[max(0, y1-pad):min(fh, y2+pad), max(0, x1-pad):min(fw, x2+pad)].copy()
                             cv2.imwrite(path, crop)
@@ -178,7 +198,7 @@ def main():
             combined = np.hstack(display_frames)
             status_map = {0: "IDLE", 1: "COLLECTING", 2: "COOLDOWN"}
             cv2.putText(combined, f"SYSTEM: {status_map[current_state]}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            cv2.imshow('Custom Zones System', combined)
+            cv2.imshow('Multi-Target System', combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
 
