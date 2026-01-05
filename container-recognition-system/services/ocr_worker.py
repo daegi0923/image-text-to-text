@@ -66,22 +66,30 @@ class ContainerOCR:
                 "role": "user",
                 "content": [
                     {"type": "image", "image": image_path_str},
-                    {"type": "text", "text": """Find the ISO 6346 shipping container number in this image. Even if the text is split across multiple lines or has irregular spacing, extract it correctly.
+                    {"type": "text", "text": """You are a precise OCR system for shipping container numbers.
 
-The container number consists of:
-- Owner code: 3 uppercase letters
-- Category identifier: 1 uppercase letter (must be U, J, R, or Z)
-- Serial number: 6 digits
-- Check digit: 1 digit
+                    **CRITICAL RULES:**
+                    1. ONLY extract text that is ACTUALLY VISIBLE in this specific image
+                    2. DO NOT make up, guess, or generate random container numbers
+                    3. DO NOT use example numbers or placeholders
+                    4. If you cannot clearly see a complete container number, respond with: NONE
 
-Format example: MSKU 602345 2 (THIS IS AN EXAMPLE)
+                    **Container Number Format (ISO 6346):**
+                    - Owner code: exactly 4 UPPERCASE letters
+                    - Serial number: exactly 6 digits
+                    - Check digit: exactly 1 digit
+                    - Example format: ABCD 123456 7
 
-Important: 
-- The 4th character MUST be U, J, R, or Z.
-- Ignore line breaks and irregular spacing in the image.
-- Return ONLY the container number in format: XXXX NNNNNN N
-- If no container number is found, respond with: NONE
-- Do not include any other text in your response"""}
+                    **Instructions:**
+                    - Look carefully at the image for text painted on the container
+                    - The text may be split across multiple lines or have irregular spacing
+                    - Extract ONLY what you can actually see in the image
+                    - Combine the parts to form: XXXX NNNNNN N
+                    - If the container number is incomplete, unclear, or not visible: respond with NONE
+                    - Your response must be ONLY the container number or NONE, nothing else
+
+                    **What you see in THIS image:**
+                """}
                 ]
             }
         ]
@@ -102,12 +110,57 @@ Important:
         
         # 추론 - 짧은 출력으로 속도 향상
         with torch.no_grad():
-            generated_ids = self.model.generate(
+            outputs = self.model.generate(
                 **inputs, 
-                max_new_tokens=50  # 컨테이너 번호는 짧으므로 축소
+                max_new_tokens=50,
+                return_dict_in_generate=True,  # 딕셔너리 형태로 결과 받기
+                output_scores=True,           # 각 토큰별 점수(로짓) 포함하기
             )
+
+            generated_ids = outputs.sequences  # 생성된 토큰 ID들
+            scores = outputs.scores            # 각 단계의 로짓(Logits) 값들
+                # 1. 생성된 토큰들만 골라내기 (입력 토큰 제외)
+        gen_sequences = generated_ids[:, inputs.input_ids.shape[-1]:]
+
+        # 2. 각 토큰별 확률 계산 및 Top-5 후보 분석
+        probs = []
+        logits = []
+        print(f"\n[DEBUG] 상세 후보 분석 (Top 5):")
         
-        # 입력 제거하고 디코딩
+        for i in range(len(scores)):
+            # 현재 스텝의 로짓 가져오기
+            current_logits = scores[i][0]
+            token_probs = torch.nn.functional.softmax(current_logits, dim=-1)
+            
+            # Top 5 후보 추출
+            top_k_probs, top_k_ids = torch.topk(token_probs, k=5)
+            
+            step_candidates = []
+            for j in range(5):
+                cand_id = top_k_ids[j].item()
+                cand_prob = top_k_probs[j].item()
+                cand_token = self.processor.decode([cand_id])
+                step_candidates.append(f"'{cand_token}'({cand_prob:.1%})")
+            
+            # 실제 선택된 토큰 정보 저장
+            token_id = gen_sequences[0, i]
+            prob = token_probs[token_id].item()
+            logit = current_logits[token_id].item()
+            chosen_token = self.processor.decode([token_id])
+            
+            probs.append(prob)
+            logits.append(logit)
+            
+            print(f"  Step {i:02d} [{chosen_token}]: {', '.join(step_candidates)}")
+
+        # 3. 토큰이랑 확률 매칭해서 확인
+        decoded_tokens = [self.processor.decode([tid]) for tid in gen_sequences[0]]
+        
+        # 디버그 정보 포맷팅 (확률과 로짓 함께 표시)
+        # 예: 'A'(99.9%, L:15.2)
+        token_debug = [f"'{token}'({prob:.1%}, L:{logit:.1f})" for token, prob, logit in zip(decoded_tokens, probs, logits)]
+        print(f"[DEBUG] 최종 선택 분석: {token_debug}")
+                # 입력 제거하고 디코딩
         generated_ids_trimmed = [
             out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
         ]
@@ -211,3 +264,74 @@ Important:
                 })
         
         return results
+
+    def consolidate_results(self, results: List[Dict[str, any]]) -> Dict[str, any]:
+        """
+        여러 카메라/프레임의 OCR 결과를 종합하여 투표(Voting)로 최종 결과 도출
+        
+        우선순위:
+        1. ISO 6346 검증 통과 여부 (최우선)
+        2. 다수결 (빈도수)
+        3. 평균 신뢰도 (Confidence)
+        """
+        print(f"\n[Voting] 총 {len(results)}개의 결과로 투표를 진행합니다.")
+        
+        candidates = {}
+        
+        for res in results:
+            if not res.get('found') or not res.get('container_number'):
+                continue
+                
+            num = res['container_number']
+            is_valid = res.get('check_digit_valid', False)
+            
+            # 신뢰도 점수 계산 (확률 정보가 없으면 기본값 0)
+            # 여기서는 간단히 전체 텍스트 확률 평균을 사용하거나, 로짓 등을 활용할 수 있음
+            # 현재 구조상 상세 확률은 로깅만 되고 있으므로, 우선순위 로직으로 처리
+            
+            if num not in candidates:
+                candidates[num] = {
+                    'count': 0,
+                    'valid': is_valid,
+                    'raw_results': []
+                }
+            
+            candidates[num]['count'] += 1
+            candidates[num]['raw_results'].append(res)
+            
+            # 하나라도 검증 통과했으면 해당 번호는 유효한 것으로 간주
+            if is_valid:
+                candidates[num]['valid'] = True
+
+        if not candidates:
+            print("[Voting] 유효한 컨테이너 번호 후보가 없습니다.")
+            return {'found': False, 'reason': 'No candidates found'}
+
+        # 후보 리스트 정렬
+        # 1. 유효성(True > False)
+        # 2. 빈도수(내림차순)
+        sorted_candidates = sorted(
+            candidates.items(),
+            key=lambda x: (x[1]['valid'], x[1]['count']),
+            reverse=True
+        )
+        
+        winner_number, winner_data = sorted_candidates[0]
+        
+        print(f"[Voting] 우승: {winner_number} (유효: {winner_data['valid']}, 득표: {winner_data['count']}/{len(results)})")
+        
+        # 2등이 있다면 로그 출력 (디버깅용)
+        if len(sorted_candidates) > 1:
+            runner_up_num, runner_up_data = sorted_candidates[1]
+            print(f"  └ 2등: {runner_up_num} (유효: {runner_up_data['valid']}, 득표: {runner_up_data['count']})")
+
+        # 최종 결과 반환 (대표 결과 하나를 리턴하되 메타데이터 추가)
+        final_result = winner_data['raw_results'][0].copy()
+        final_result['voting_meta'] = {
+            'total_votes': len(results),
+            'winner_count': winner_data['count'],
+            'is_unanimous': winner_data['count'] == len(results),
+            'candidates_count': len(candidates)
+        }
+        
+        return final_result

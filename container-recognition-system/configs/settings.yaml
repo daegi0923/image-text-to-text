@@ -1,8 +1,10 @@
 system:
-  video_path: "data/raw_videos/gate_side2.mp4"
-  output_dir: "outputs"
+  video_sources:
+    - "data/raw_videos/gate_side1.mp4"
+    - "data/raw_videos/gate_side2.mp4"
+  video_path: "data/raw_videos/gate_side2.mp4"  # 하위 호환용 유지
+  log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
-  log_file: "outputs/gate_access_log.csv"
 
 model:
   yolo_path: "outputs/yolo_container_ocr/weights/best.pt"
