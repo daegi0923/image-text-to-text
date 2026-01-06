@@ -110,7 +110,7 @@ class ContainerOCR:
             img_path_str = str(path)
             try:
                 # cls=True: 방향 보정
-                ocr_result = self.model.ocr(img_path_str, cls=True)
+                ocr_result = self.model.ocr(img_path_str)
                 
                 full_text = ""
                 conf_sum = 0
