@@ -4,6 +4,32 @@ import re
 import time
 import torch
 import logging
+import os
+import sys
+
+# [Windows DLL 경로 강제 주입]
+# PaddleOCR이 pip로 설치된 nvidia-cudnn-cu12의 DLL을 못 찾을 때 해결책
+if os.name == 'nt':
+    import site
+    try:
+        # site-packages 경로 찾기
+        site_packages = site.getsitepackages()
+        for sp in site_packages:
+            cudnn_bin = os.path.join(sp, 'nvidia', 'cudnn', 'bin')
+            cublas_bin = os.path.join(sp, 'nvidia', 'cublas', 'bin')
+            
+            if os.path.exists(cudnn_bin):
+                os.add_dll_directory(cudnn_bin)
+                # PATH에도 추가 (구형 호환)
+                os.environ['PATH'] = cudnn_bin + os.pathsep + os.environ['PATH']
+                print(f"DEBUG: Added DLL dir -> {cudnn_bin}")
+                
+            if os.path.exists(cublas_bin):
+                os.add_dll_directory(cublas_bin)
+                os.environ['PATH'] = cublas_bin + os.pathsep + os.environ['PATH']
+                print(f"DEBUG: Added DLL dir -> {cublas_bin}")
+    except Exception as e:
+        print(f"Warning: Failed to add DLL directory: {e}")
 
 # ISO 검증 모듈
 from . import validator as iso6346
