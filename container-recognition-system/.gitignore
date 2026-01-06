@@ -28,6 +28,7 @@ wheels/
 # Data & Outputs (Local Only)
 data/raw_videos/
 data/frames/
+data/labels/
 data/dataset/
 outputs/
 temp_frames/

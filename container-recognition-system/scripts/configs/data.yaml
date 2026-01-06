@@ -1,10 +1,10 @@
 # YOLO Dataset Configuration
 # Relative path from this file (configs/data.yaml) to the dataset folder
-path: /home/uncommon/image-text-to-text/container-recognition-system/data/dataset
+path: ../data/dataset
 train: images/train
 val: images/val
 test:  # optional
 
 # Classes
 names:
-  0: container_code
+  1: container_code
