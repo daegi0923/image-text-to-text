@@ -114,13 +114,13 @@ class ContainerOCR:
             img_path_str = str(path)
             try:
                 # cls=True: 방향 보정
-                ocr_result = self.model.ocr(img_path_str, cls=True)
+                ocr_result = self.model.ocr(img_path_str)
                 
                 # 결과 파싱: 텍스트 덩어리들을 하나로 합침
                 full_text = ""
                 conf_sum = 0
                 count = 0
-                
+                print('result : ', ocr_result)
                 if ocr_result and ocr_result[0]:
                     # ocr_result[0] -> [ [ [[x,y],..], ("TEXT", 0.99) ], ... ]
                     texts = [line[1][0] for line in ocr_result[0]]
