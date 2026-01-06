@@ -143,7 +143,7 @@ def ocr_global_batch_worker(task_queue, result_queue, ocr_worker, logger):
                 start_inference = time.time()
                 
                 all_results = ocr_worker.process_batch(accumulated_images)
-                
+                print(all_results)
                 end_inference = time.time()
                 duration = end_inference - start_inference
                 avg_per_img = duration / batch_size if batch_size > 0 else 0
@@ -158,7 +158,7 @@ def ocr_global_batch_worker(task_queue, result_queue, ocr_worker, logger):
                 for i, res in enumerate(all_results):
                     owner_task_idx = accumulated_meta[i]['task_idx']
                     task_results_map[owner_task_idx].append(res)
-                
+
                 # 5. 각 Task별로 투표(Consolidate) 후 결과 큐 전송
                 for idx, task in enumerate(pending_tasks):
                     task_imgs_results = task_results_map[idx]

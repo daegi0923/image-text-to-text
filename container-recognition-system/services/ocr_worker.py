@@ -103,79 +103,93 @@ class ContainerOCR:
         return results
 
     def _process_batch_paddle(self, image_paths) -> List[Dict]:
-        """PaddleOCR 배치 처리 (방탄 처리 적용)"""
+        """PaddleOCR 배치 처리 (세로 텍스트 대응 회전 로직 추가)"""
         results = []
-        
+        import cv2
+        import numpy as np
+
         for path in image_paths:
             img_path_str = str(path)
-            try:
-                # cls=True: 방향 보정
-                ocr_result = self.model.ocr(img_path_str)
-                
-                full_text = ""
-                conf_sum = 0
-                count = 0
-                
-                # PaddleOCR 결과 구조가 다양함 (리스트, 딕셔너리 등)
-                # 보통: [[[[x,y],..], ("TEXT", 0.99)], ...] 
-                # 또는 [None] (아무것도 못 찾음)
-                # 최신 버전에서는 딕셔너리 리스트로 나오기도 함
-                
-                valid_lines = []
-                
-                if ocr_result:
-                    # 결과가 리스트인 경우 (일반적)
-                    if isinstance(ocr_result, list):
-                        # 중첩 리스트일 수 있으므로 평탄화(Flatten) 시도
-                        for item in ocr_result:
-                            if not item: continue
-                            
-                            if isinstance(item, list):
-                                # [[bbox, (text, conf)], ...] 형태인지 확인
-                                for line in item:
-                                    # line 구조가 [bbox, (text, conf)] 인지, 아니면 딕셔너리인지 확인
-                                    if isinstance(line, dict) and 'rec_texts' in line:
-                                        # 딕셔너리 형태 (최신/DocParser 모드)
-                                        # rec_texts: ['HMMU', '554211']
-                                        if 'rec_texts' in line:
+            
+            # 1. 원본 이미지 로드
+            original_img = cv2.imread(img_path_str)
+            if original_img is None:
+                results.append({'found': False, 'image_path': img_path_str, 'error': 'Image load failed'})
+                continue
+
+            # 시도할 이미지 목록 (원본 -> 시계90 -> 반시계90)
+            # (이미지 객체, 회전각도설명)
+            attempts = [
+                (original_img, "Original"),
+                (cv2.rotate(original_img, cv2.ROTATE_90_CLOCKWISE), "Rot90_CW"),
+                (cv2.rotate(original_img, cv2.ROTATE_90_COUNTERCLOCKWISE), "Rot90_CCW")
+            ]
+            
+            best_result = {'found': False, 'container_number': None, 'confidence': 0.0}
+            
+            for img, angle_desc in attempts:
+                try:
+                    # PaddleOCR에 numpy array 직접 전달 가능
+                    ocr_result = self.model.ocr(img, cls=True)
+                    
+                    full_text = ""
+                    conf_sum = 0
+                    count = 0
+                    valid_lines = []
+                    
+                    if ocr_result:
+                        if isinstance(ocr_result, list):
+                            for item in ocr_result:
+                                if not item: continue
+                                if isinstance(item, list):
+                                    for line in item:
+                                        if isinstance(line, dict) and 'rec_texts' in line:
                                             valid_lines.extend(zip(line['rec_texts'], line.get('rec_scores', [0]*len(line['rec_texts']))))
-                                    
-                                    elif isinstance(line, list) and len(line) >= 2 and isinstance(line[1], tuple):
-                                        # 전통적 튜플 형태: (text, conf)
-                                        valid_lines.append(line[1])
-                                        
-                            elif isinstance(item, dict):
-                                # 최상위가 딕셔너리인 경우
-                                if 'rec_texts' in item:
+                                        elif isinstance(line, list) and len(line) >= 2 and isinstance(line[1], tuple):
+                                            valid_lines.append(line[1])
+                                elif isinstance(item, dict) and 'rec_texts' in item:
                                     valid_lines.extend(zip(item['rec_texts'], item.get('rec_scores', [0]*len(item['rec_texts']))))
 
-                # 텍스트 합치기
-                if valid_lines:
-                    texts = [txt for txt, conf in valid_lines]
-                    confs = [float(conf) for txt, conf in valid_lines]
-                    full_text = " ".join(texts)
-                    conf_sum = sum(confs)
-                    count = len(confs)
-                
-                avg_conf = conf_sum / count if count > 0 else 0.0
-                
-                info = self._parse_container_number(full_text)
-                info.update({
-                    'image_path': img_path_str,
-                    'raw_output': full_text,
-                    'confidence': avg_conf
-                })
-                results.append(info)
-                
-            except Exception as e:
-                self.logger.error(f"PaddleOCR Error ({path}): {e}")
-                # 에러 나도 죽지 않고 실패 처리
-                results.append({
-                    'found': False, 
-                    'image_path': img_path_str, 
-                    'error': str(e),
-                    'container_number': None
-                })
+                    if valid_lines:
+                        texts = [txt for txt, conf in valid_lines]
+                        confs = [float(conf) for txt, conf in valid_lines]
+                        full_text = " ".join(texts)
+                        conf_sum = sum(confs)
+                        count = len(confs)
+                    
+                    avg_conf = conf_sum / count if count > 0 else 0.0
+                    
+                    # 파싱 시도
+                    info = self._parse_container_number(full_text)
+                    
+                    # 찾았으면 즉시 채택 (단, 체크 디지트 유효한 걸 우선)
+                    if info['found']:
+                        info.update({
+                            'image_path': img_path_str,
+                            'raw_output': full_text,
+                            'confidence': avg_conf,
+                            'rotation_used': angle_desc
+                        })
+                        
+                        # 체크 디지트 맞으면 더 볼 것도 없이 확정
+                        if info.get('check_digit_valid'):
+                            best_result = info
+                            break # 루프 탈출
+                        
+                        # 체크 디지트 틀려도 일단 후보로 등록 (다른 각도에서 더 좋은 게 나올 수 있으니 break 안 함)
+                        if avg_conf > best_result.get('confidence', 0):
+                            best_result = info
+                    
+                except Exception as e:
+                    self.logger.warning(f"OCR Fail ({angle_desc}): {e}")
+            
+            # 3번 다 해봤는데도 없으면 실패 처리, 하나라도 건졌으면 성공
+            if best_result.get('found'):
+                if best_result.get('rotation_used') != "Original":
+                    self.logger.info(f"🔄 회전 인식 성공 ({img_path_str}): {best_result['rotation_used']} -> {best_result['container_number']}")
+                results.append(best_result)
+            else:
+                results.append({'found': False, 'image_path': img_path_str, 'raw_output': '', 'confidence': 0})
                 
         return results
 
