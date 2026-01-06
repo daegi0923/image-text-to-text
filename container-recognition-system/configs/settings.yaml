@@ -1,17 +1,17 @@
 system:
   # 카메라별 설정 (소스 + 전용 모델)
   cameras:
-    - name: "side_view_1"
-      source: "data/raw_videos/gate_side1.mp4"
-      weights: "outputs/yolo_container_ocr/weights/best.pt"
+    - name: "side_view_back"
+      source: "data/raw_videos/gate_side2.mp4"
+      weights: "models/container_side/best.pt"
       detection_zone: {x_min: 0.4, x_max: 0.6, y_min: 0.25, y_max: 0.75}
       target_classes: [0] # 이 카메라는 0번 클래스만 봄
       
-    - name: "side_view_2"
+    - name: "top_view_front"
       source: "data/raw_videos/gate_top1.mp4"
-      weights: "outputs/yolo_container_ocr2/weights/best.pt"
+      weights: "models/container_top/best.pt"
       detection_zone: {x_min: 0.3, x_max: 0.7, y_min: 0.3, y_max: 1}
-      target_classes: [1] # 이 카메라는 0, 1번 둘 다 봄
+      target_classes: [0] # 이 카메라는 0, 1번 둘 다 봄
   
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"

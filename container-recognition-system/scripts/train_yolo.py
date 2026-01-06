@@ -23,7 +23,7 @@ def train():
         patience=20,       # 성능 향상이 없으면 조기 종료
         save=True,         # 체크포인트 저장
         project="outputs", # 저장 경로
-        name="yolo_container_ocr" # 실험 이름
+        name="yolo_container_ocr_top" # 실험 이름
     )
     
     print("학습 완료!")
