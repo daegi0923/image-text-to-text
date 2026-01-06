@@ -103,12 +103,8 @@ class ContainerOCR:
         return results
 
     def _process_batch_paddle(self, image_paths) -> List[Dict]:
-        """PaddleOCR 배치 처리"""
+        """PaddleOCR 배치 처리 (방탄 처리 적용)"""
         results = []
-        
-        # PaddleOCR은 리스트로 던지면 내부적으로 루프를 돌지만 속도가 매우 빠름
-        # (공식적으로 batch_size 파라미터가 없어서 한 장씩 호출해도 충분히 빠름)
-        # 만약 진정한 배치를 원하면 PP-OCRv4 추론 모델을 직접 서빙해야 함
         
         for path in image_paths:
             img_path_str = str(path)
@@ -116,22 +112,53 @@ class ContainerOCR:
                 # cls=True: 방향 보정
                 ocr_result = self.model.ocr(img_path_str, cls=True)
                 
-                # 결과 파싱: 텍스트 덩어리들을 하나로 합침
                 full_text = ""
                 conf_sum = 0
                 count = 0
                 
-                if ocr_result and ocr_result[0]:
-                    # ocr_result[0] -> [ [ [[x,y],..], ("TEXT", 0.99) ], ... ]
-                    texts = [line[1][0] for line in ocr_result[0]]
-                    confs = [line[1][1] for line in ocr_result[0]]
+                # PaddleOCR 결과 구조가 다양함 (리스트, 딕셔너리 등)
+                # 보통: [[[[x,y],..], ("TEXT", 0.99)], ...] 
+                # 또는 [None] (아무것도 못 찾음)
+                # 최신 버전에서는 딕셔너리 리스트로 나오기도 함
+                
+                valid_lines = []
+                
+                if ocr_result:
+                    # 결과가 리스트인 경우 (일반적)
+                    if isinstance(ocr_result, list):
+                        # 중첩 리스트일 수 있으므로 평탄화(Flatten) 시도
+                        for item in ocr_result:
+                            if not item: continue
+                            
+                            if isinstance(item, list):
+                                # [[bbox, (text, conf)], ...] 형태인지 확인
+                                for line in item:
+                                    # line 구조가 [bbox, (text, conf)] 인지, 아니면 딕셔너리인지 확인
+                                    if isinstance(line, dict) and 'rec_texts' in line:
+                                        # 딕셔너리 형태 (최신/DocParser 모드)
+                                        # rec_texts: ['HMMU', '554211']
+                                        if 'rec_texts' in line:
+                                            valid_lines.extend(zip(line['rec_texts'], line.get('rec_scores', [0]*len(line['rec_texts']))))
+                                    
+                                    elif isinstance(line, list) and len(line) >= 2 and isinstance(line[1], tuple):
+                                        # 전통적 튜플 형태: (text, conf)
+                                        valid_lines.append(line[1])
+                                        
+                            elif isinstance(item, dict):
+                                # 최상위가 딕셔너리인 경우
+                                if 'rec_texts' in item:
+                                    valid_lines.extend(zip(item['rec_texts'], item.get('rec_scores', [0]*len(item['rec_texts']))))
+
+                # 텍스트 합치기
+                if valid_lines:
+                    texts = [txt for txt, conf in valid_lines]
+                    confs = [float(conf) for txt, conf in valid_lines]
                     full_text = " ".join(texts)
                     conf_sum = sum(confs)
                     count = len(confs)
                 
                 avg_conf = conf_sum / count if count > 0 else 0.0
                 
-                # 컨테이너 번호 추출 로직
                 info = self._parse_container_number(full_text)
                 info.update({
                     'image_path': img_path_str,
@@ -142,7 +169,13 @@ class ContainerOCR:
                 
             except Exception as e:
                 self.logger.error(f"PaddleOCR Error ({path}): {e}")
-                results.append({'found': False, 'image_path': img_path_str, 'error': str(e)})
+                # 에러 나도 죽지 않고 실패 처리
+                results.append({
+                    'found': False, 
+                    'image_path': img_path_str, 
+                    'error': str(e),
+                    'container_number': None
+                })
                 
         return results
 
