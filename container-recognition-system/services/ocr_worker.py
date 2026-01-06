@@ -39,8 +39,8 @@ class ContainerOCR:
             
             self.logger.info("🚀 PaddleOCR 초기화 중 (언어: en, GPU: 자동감지)...")
             # use_angle_cls=True: 뒤집힌 글자도 바로잡아서 읽음
-            # use_gpu=True: GPU 있으면 씀 (없으면 자동 CPU)
-            self.model = PaddleEngine(use_angle_cls=True, lang='en', use_gpu=torch.cuda.is_available(), show_log=False)
+            # use_gpu 옵션 제거 (자동 감지 위임)
+            self.model = PaddleEngine(use_angle_cls=True, lang='en')
             self.logger.info("✅ PaddleOCR 준비 완료!")
             
         else:
