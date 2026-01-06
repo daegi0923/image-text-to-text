@@ -19,8 +19,8 @@ system:
 model:
   yolo_default: "yolo11n.pt"
   conf_threshold: 0.5
-  ocr_model: "Qwen/Qwen3-VL-2B-Instruct"
-  target_classes: [0, 1] # 0: container_code, 1: container_name (모델 학습 시 설정한 ID 확인 필요)
+  ocr_model: "paddle" # "Qwen/..." 대신 "paddle" 사용
+  target_classes: [0, 1]
 
 parameters:
   cooldown_frames: 150

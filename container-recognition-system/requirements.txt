@@ -1,20 +1,20 @@
-# Core Deep Learning & Vision
-torch
-transformers
-qwen-vl-utils
-ultralytics
+# Core
 opencv-python
-pillow
-
-# Hardware Acceleration & Optimization
-accelerate
-bitsandbytes
-
-# Data Handling & Utils
 pandas
 numpy
-tqdm
+PyYAML
+ultralytics
 
-# Web/API (Optional but often needed for HF models)
-requests
-huggingface-hub
+# OCR (Qwen3-VL)
+transformers
+qwen_vl_utils
+torch
+torchvision
+torchaudio
+accelerate
+pillow
+
+# OCR (PaddleOCR)
+paddlepaddle-gpu>=2.6.0; sys_platform == 'linux' or sys_platform == 'win32'
+paddlepaddle>=2.6.0; sys_platform == 'darwin'
+paddleocr>=2.7.0
