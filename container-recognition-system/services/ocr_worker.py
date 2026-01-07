@@ -130,7 +130,7 @@ class ContainerOCR:
             for img, angle_desc in attempts:
                 try:
                     # PaddleOCR에 numpy array 직접 전달 가능
-                    ocr_result = self.model.ocr(img, cls=True)
+                    ocr_result = self.model.ocr(img)
                     
                     full_text = ""
                     conf_sum = 0
