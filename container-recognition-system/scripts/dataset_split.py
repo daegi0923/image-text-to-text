@@ -77,8 +77,8 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
 
 if __name__ == '__main__':
     # 기본 경로 설정 (프로젝트 루트 기준)
-    IMAGE_DIR = 'data/frames' 
-    LABEL_DIR = 'data/labels'
-    DATASET_ROOT = 'data/dataset'
+    IMAGE_DIR = 'data/raw_data_multilabel/images' 
+    LABEL_DIR = 'data/raw_data_multilabel/labels'
+    DATASET_ROOT = 'data/dataset_multilabel'
     
     organize_dataset_with_exported_labels(IMAGE_DIR, LABEL_DIR, DATASET_ROOT)
