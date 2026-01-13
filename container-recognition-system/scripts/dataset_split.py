@@ -51,8 +51,10 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
 
     print(f"총 {len(data_pairs)}개의 쌍이 매칭되었습니다.")
     
-    # 셔플 및 분할
-    random.shuffle(data_pairs)
+    # [수정] 랜덤 셔플 제거하고 이름순(시간순)으로 정렬
+    # 파일명에 타임스탬프가 있으므로 정렬하면 시퀀셜하게 정렬됨
+    data_pairs.sort(key=lambda x: x[2]) 
+    
     split_idx = int(len(data_pairs) * split_ratio)
     train_data = data_pairs[:split_idx]
     val_data = data_pairs[split_idx:]
