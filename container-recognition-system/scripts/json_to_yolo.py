@@ -1,62 +1,68 @@
 import json
 import os
+import shutil
 
 # 1. 환경 설정
-json_file = 'bpt_gate.json'  # 내보낸 JSON 파일명
+json_file = 'bpt_gate.json'      # 내보낸 JSON 파일명
 output_dir = './yolo_dataset'    # 결과 저장 폴더
-classes = ['truck', 'container', 'code_area'] # 클래스 순서 (중요!)
+classes = ['truck', 'container', 'code_area']
 
+# 폴더 구조 생성
 os.makedirs(f"{output_dir}/labels", exist_ok=True)
+os.makedirs(f"{output_dir}/images", exist_ok=True)
 
 with open(json_file, 'r', encoding='utf-8') as f:
     data = json.load(f)
 
+print("데이터 변환 및 이미지 복사 시작함...")
+
 for task in data:
-    # 각 카메라별(cam1~cam4) 결과 순회
     for i in range(1, 5):
         cam_url_key = f'cam_0{i}_url'
         cam_to_name = f'cam{i}'
         
-        # 1. 카메라 데이터가 없는 경우(예: cam_03) 안전하게 건너뛰기
         img_url = task['data'].get(cam_url_key)
         if not img_url:
             continue
             
-        # 2. 파일명 깔끔하게 추출
-        # '/data/local-files/?d=path/to/image.jpg'에서 'image.jpg'만 추출
+        # 1. 경로 파싱 (Label Studio URL -> 로컬 상대 경로)
+        # '/data/local-files/?d=data/dataset/...' -> 'data/dataset/...'
         if '?d=' in img_url:
-            actual_path = img_url.split('?d=')[-1]
-            filename = os.path.basename(actual_path)
+            local_rel_path = img_url.split('?d=')[-1]
         else:
-            filename = os.path.basename(img_url)
-            
+            local_rel_path = img_url.replace('/data/local-files/', '')
+
+        filename = os.path.basename(local_rel_path)
         label_filename = os.path.splitext(filename)[0] + '.txt'
         
         yolo_labels = []
         
-        # 해당 카메라의 라벨 찾기
+        # 2. 해당 카메라의 라벨링 데이터 추출
         for result in task['annotations'][0]['result']:
-            # Label Studio의 to_name(cam1, cam2 등)과 현재 루프의 카메라 매칭
             if result.get('to_name') == cam_to_name and result['type'] == 'rectanglelabels':
                 label_name = result['value']['rectanglelabels'][0]
-                if label_name not in classes: 
-                    continue
+                if label_name not in classes: continue
                 class_id = classes.index(label_name)
                 
-                # 좌표 변환 (Label Studio % -> YOLO 0~1)
-                x = result['value']['x'] / 100
-                y = result['value']['y'] / 100
-                w = result['value']['width'] / 100
-                h = result['value']['height'] / 100
+                # 좌표 변환
+                x, y, w, h = result['value']['x'], result['value']['y'], result['value']['width'], result['value']['height']
+                cx = (x + w / 2) / 100
+                cy = (y + h / 2) / 100
+                nw = w / 100
+                nh = h / 100
                 
-                cx = x + (w / 2)
-                cy = y + (h / 2)
-                
-                yolo_labels.append(f"{class_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+                yolo_labels.append(f"{class_id} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}")
 
-        # 텍스트 파일 저장 (라벨이 있는 경우만)
+        # 3. 라벨이 있는 경우에만 처리
         if yolo_labels:
+            # 라벨 텍스트 저장
             with open(f"{output_dir}/labels/{label_filename}", 'w') as lf:
                 lf.write('\n'.join(yolo_labels))
+            
+            # 이미지 파일 복사 (원본 경로에 파일이 있는지 확인 후 복사)
+            if os.path.exists(local_rel_path):
+                shutil.copy(local_rel_path, f"{output_dir}/images/{filename}")
+            else:
+                print(f"경고: 이미지를 찾을 수 없음 -> {local_rel_path}")
 
-print(f"변환 완료! {output_dir}/labels 폴더에 {len(os.listdir(output_dir + '/labels'))}개의 파일이 생성되었습니다.")
+print(f"작업 완료! 생성된 라벨: {len(os.listdir(output_dir + '/labels'))}개, 복사된 이미지: {len(os.listdir(output_dir + '/images'))}개")
