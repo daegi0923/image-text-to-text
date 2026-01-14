@@ -49,12 +49,18 @@ class GateSessionManager:
         self.last_update_time = 0
         self.session_start_time = 0
         self.is_session_active = False
+        self.ref_image_path = None # Master가 찍은 전체 샷
 
-    def add_result(self, result_data):
-        if not self.current_session:
+    def notify_trigger(self, image_path):
+        """트리거 발생 시 호출 (Master가 찍은 사진 접수)"""
+        if not self.is_session_active:
             self.session_start_time = time.time()
             self.is_session_active = True
-            
+            self.ref_image_path = image_path # 세션 대표 이미지 저장
+            self.logger.info("🎬 [세션 시작] 트럭 진입 감지")
+        self.last_update_time = time.time()
+
+    def add_result(self, result_data):
         self.current_session.append(result_data)
         self.last_update_time = time.time()
         self.logger.info(f"📥 [수집] {result_data['number']} (Cam:{result_data['unit']}) - 누적 {len(self.current_session)}건")
@@ -65,56 +71,72 @@ class GateSessionManager:
             self.finalize_session()
 
     def finalize_session(self):
-        if not self.current_session:
-            self.is_session_active = False
+        if not self.is_session_active:
             return
         
         duration = time.time() - self.session_start_time
         
-        # 1. 다수결 투표
-        vote_box = {}
-        for item in self.current_session:
-            num = item['number']
-            vote_box[num] = vote_box.get(num, 0) + 1 
+        # [Case 1] 데이터가 하나도 없음 -> 빈 트럭 or 인식 실패
+        if not self.current_session:
+            self.logger.warning(f"⚠️ [미탐지] 물체는 지나갔으나 번호 인식 실패 (소요: {duration:.2f}초)")
+            
+            record = {
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'final_number': "EMPTY_OR_FAILED",
+                'vote_count': 0,
+                'total_samples': 0,
+                'units': "Master_Only",
+                'duration_sec': round(duration, 2),
+                'evidence_img_1': self.ref_image_path, # Top 뷰 사진 저장
+                'evidence_img_2': None,
+                'evidence_img_3': None,
+            }
+        else:
+            # [Case 2] 정상 인식
+            vote_box = {}
+            for item in self.current_session:
+                num = item['number']
+                vote_box[num] = vote_box.get(num, 0) + 1 
 
-        sorted_votes = sorted(vote_box.items(), key=lambda x: x[1], reverse=True)
-        winner_num, votes = sorted_votes[0]
-        units_involved = list(set([item['unit'] for item in self.current_session]))
+            sorted_votes = sorted(vote_box.items(), key=lambda x: x[1], reverse=True)
+            winner_num, votes = sorted_votes[0]
+            units_involved = list(set([item['unit'] for item in self.current_session]))
 
-        # 2. 증거 사진 선발대회 (Winner 번호를 지지한 이미지들 중 Top 3)
-        all_evidence = []
-        for item in self.current_session:
-            if item['number'] == winner_num:
-                # 각 결과에 포함된 원본 이미지 리스트를 가져옴
-                if 'evidence_images' in item:
-                    all_evidence.extend(item['evidence_images'])
+            # 필터링 (너무 짧거나 적으면 무시하되, 로그에는 남기고 싶다면 로직 조정 가능)
+            # 여기서는 7자리 미만도 일단 기록하되 경고만 찍음 (사용자 요청 반영: 빈 트럭도 남겨야 하므로)
+            
+            # 증거 사진 선발
+            all_evidence = []
+            for item in self.current_session:
+                if item['number'] == winner_num:
+                    if 'evidence_images' in item:
+                        all_evidence.extend(item['evidence_images'])
+            all_evidence.sort(key=lambda x: x.get('score', 0), reverse=True)
+            top_3 = all_evidence[:3]
+
+            self.logger.info(f"🏆 [확정] {winner_num} (투표: {votes}/{len(self.current_session)})")
+
+            record = {
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'final_number': winner_num,
+                'vote_count': votes,
+                'total_samples': len(self.current_session),
+                'units': ",".join(units_involved),
+                'duration_sec': round(duration, 2),
+                'evidence_img_1': top_3[0]['path'] if len(top_3) > 0 else self.ref_image_path,
+                'evidence_img_2': top_3[1]['path'] if len(top_3) > 1 else None,
+                'evidence_img_3': top_3[2]['path'] if len(top_3) > 2 else None,
+            }
         
-        # 점수(score) 기준 내림차순 정렬
-        all_evidence.sort(key=lambda x: x.get('score', 0), reverse=True)
-        top_3_evidence = all_evidence[:3]
-
-        self.logger.info(f"🏆 [확정] {winner_num} (투표: {votes}/{len(self.current_session)}) | Cam: {units_involved}")
-
-        # 3. 기록 저장
-        record = {
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'final_number': winner_num,
-            'vote_count': votes,
-            'total_samples': len(self.current_session),
-            'units': ",".join(units_involved),
-            'duration_sec': round(duration, 2),
-            # 증거 사진 경로 추가
-            'evidence_img_1': top_3_evidence[0]['path'] if len(top_3_evidence) > 0 else None,
-            'evidence_img_2': top_3_evidence[1]['path'] if len(top_3_evidence) > 1 else None,
-            'evidence_img_3': top_3_evidence[2]['path'] if len(top_3_evidence) > 2 else None,
-        }
-        
+        # 파일 저장
         df = pd.DataFrame([record])
         header = not os.path.exists(self.log_file)
         df.to_csv(self.log_file, mode='a', header=header, index=False, encoding='utf-8-sig')
         
+        # 초기화
         self.current_session = []
         self.is_session_active = False
+        self.ref_image_path = None
 
 
 # --- [OCR 워커] GPU 일괄 처리 ---
@@ -201,7 +223,11 @@ def main():
     param_conf = config.get('parameters', {})
     
     log_file = sys_conf.get('log_file', 'outputs/gate_log.csv')
-    logger = setup_logger(log_file=log_file)
+    
+    # [수정] 시스템 로그는 별도 파일(system.log)에 저장하여 CSV 오염 방지
+    system_log_path = os.path.join(os.path.dirname(log_file), 'system.log')
+    logger = setup_logger(log_file=system_log_path)
+    
     logger.info("=== [Top-Triggered] 컨테이너 인식 시스템 시작 ===")
 
     # 1. 초기화
@@ -233,7 +259,8 @@ def main():
                     'zone': cam_conf.get('detection_zone'),
                     'targets': cam_conf.get('target_classes'), 
                     'buffer': {}, 
-                    'fps': cam.fps, 'acc': 0.0
+                    'fps': cam.fps, 'acc': 0.0,
+                    'frame_idx': 0 # 프레임 스킵용 카운터
                 })
                 logger.info(f"🎥 [{role.upper()}] {name} 준비 완료")
             except Exception as e:
@@ -317,6 +344,12 @@ def main():
             # --- [CORE LOGIC] ---
             should_detect = (role == 'master') or (role == 'slave' and trigger_active)
             
+            # [최적화] Slave는 3프레임마다 1번만 추론 (부하 감소)
+            unit['frame_idx'] += 1
+            SKIP_INTERVAL = 3 
+            if role == 'slave' and (unit['frame_idx'] % SKIP_INTERVAL != 0):
+                should_detect = False
+
             if should_detect:
                 results = unit['detector'].track(frame)
                 
@@ -341,7 +374,14 @@ def main():
                         if role == 'master':
                             if not trigger_active:
                                 logger.info(f"🔔 [TRIGGER] {unit['name']} -> 시스템 가동")
+                                # [NEW] 트리거 시작 시점에 Top뷰 사진 한 장 박제 (빈 트럭 증거용)
+                                ref_img_path = os.path.join(temp_dir, f"REF_{unit['name']}_{int(current_time)}.jpg")
+                                cv2.imwrite(ref_img_path, frame)
+                                session_manager.notify_trigger(ref_img_path)
+                            
                             trigger_manager.activate(source_name=unit['name'])
+                            # 트리거 중에도 계속 갱신하고 싶으면 notify_trigger를 계속 호출해도 됨 (마지막 시점 갱신용)
+                            session_manager.notify_trigger(None)  # None을 보내면 시간만 갱신됨 (선택사항)
 
                         # [Slave]
                         elif role == 'slave':
