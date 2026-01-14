@@ -23,7 +23,7 @@ system:
       source: "rtsp://admin:Hello%402023@10.100.3.113:554/0/onvif/profile2/media.smp"
       weights: "models/bpt_gate/best.pt"
       target_classes: [2]
-      detection_zone: {x_min: 0.1, x_max: 0.5, y_min: 0.4, y_max: 0.9}
+      detection_zone: {x_min: 0.1, x_max: 0.5, y_min: 0.1, y_max: 0.9}
 
 
   log_file: "outputs/gate_log.csv"
