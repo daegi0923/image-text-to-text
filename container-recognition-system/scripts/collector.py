@@ -1,109 +1,152 @@
 import cv2
-import os
-import csv
 import time
+import os
+import sys
+import yaml
+import numpy as np
 from datetime import datetime
-from ultralytics import YOLO
 
-def run_collector(model_path, source, output_dir="data/collected_samples", conf_threshold=0.5):
-    # 1. 디렉토리 및 CSV 초기화
-    os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(output_dir, "labels.csv")
+# 프로젝트 루트 경로 추가 (모듈 import용)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from drivers.camera import Camera
+
+# 설정 로드
+def load_config():
+    path = "configs/settings.yaml"
+    if not os.path.exists(path):
+        # 스크립트 실행 위치에 따라 경로 보정
+        path = "../configs/settings.yaml"
     
-    if not os.path.exists(csv_path):
-        with open(csv_path, 'w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['filename', 'label', 'conf', 'collected_at', 'track_id'])
+    with open(path, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
 
-    print(f"🚀 상위 3장 수집기 가동! 저장 경로: {output_dir}")
-    model = YOLO(model_path)
-    cap = cv2.VideoCapture(source)
+def resize_frame(frame, width=640):
+    h, w = frame.shape[:2]
+    scale = width / w
+    return cv2.resize(frame, (width, int(h * scale)))
+
+def main():
+    print("=== 📸 다중 카메라 데이터 수집기 ===")
+    print(" [R] : 연속 촬영 On/Off (0.2초 간격)")
+    print(" [Space] : 1회 스냅샷")
+    print(" [Q] : 종료")
+
+    config = load_config()
+    sys_conf = config.get('system', {})
     
-    # 트랙별 버퍼: {tid: [{'conf': 0.9, 'img': frame}, ...]} - 최대 3개 유지
-    best_shots_buffer = {} 
-    finalized_ids = set()
+    # 저장 경로 설정
+    base_save_dir = "data/dataset/collected_captures"
+    
+    cameras = []
+    for conf in sys_conf.get('cameras', []):
+        name = conf.get('name')
+        src = conf.get('source')
+        
+        # 저장 폴더 생성
+        save_dir = os.path.join(base_save_dir, name)
+        os.makedirs(save_dir, exist_ok=True)
+        
+        try:
+            cam = Camera(src)
+            cameras.append({
+                'name': name,
+                'cam': cam,
+                'save_dir': save_dir
+            })
+            print(f"✅ 카메라 로드: {name}")
+        except Exception as e:
+            print(f"❌ 카메라 실패 ({name}): {e}")
 
-    # 중앙 영역에서만 수집 (정확도 확보)
-    ROI_X_MIN, ROI_X_MAX = 0.15, 0.85
+    if not cameras:
+        print("사용 가능한 카메라가 없습니다.")
+        return
 
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret: break
+    recording = False
+    last_record_time = 0
+    record_interval = 0.2 # 0.2초마다 저장 (너무 빠르면 중복 많음)
+    total_saved = 0
 
-        fh, fw = frame.shape[:2]
-        results = model.track(frame, persist=True, conf=conf_threshold, verbose=False)
-
+    while True:
         current_time = time.time()
+        frames_to_show = []
+        captured_this_loop = False
 
-        if results and results[0].boxes.id is not None:
-            boxes = results[0].boxes
-            for box, track_id in zip(boxes, boxes.id):
-                tid = int(track_id)
-                if tid in finalized_ids: continue
+        # 1. 프레임 읽기
+        current_frames = {} # {name: frame}
+        for unit in cameras:
+            frame = unit['cam'].get_frame()
+            if frame is None:
+                # 프레임 없으면 검은 화면
+                frame = np.zeros((360, 640, 3), dtype=np.uint8)
+            
+            current_frames[unit['name']] = frame
+            
+            # 화면 표시용 리사이즈
+            disp = resize_frame(frame, width=480)
+            
+            # 녹화 중 표시 (빨간 테두리)
+            if recording:
+                cv2.rectangle(disp, (0,0), (disp.shape[1], disp.shape[0]), (0,0,255), 3)
+                cv2.circle(disp, (30, 30), 10, (0,0,255), -1)
+            
+            cv2.putText(disp, unit['name'], (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            frames_to_show.append(disp)
 
-                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-                conf = float(box.conf[0])
-                cx = (x1 + x2) / 2 / fw
+        # 2. 저장 로직 (연속 or 스냅샷)
+        key = cv2.waitKey(1) & 0xFF
+        
+        # [Trigger 조건]
+        save_now = False
+        if key == ord(' '): # 스페이스바 (단발)
+            save_now = True
+            print("📸 스냅샷 찰칵!")
+        elif recording and (current_time - last_record_time > record_interval): # 연속 촬영
+            save_now = True
+            last_record_time = current_time
 
-                if ROI_X_MIN < cx < ROI_X_MAX:
-                    if tid not in best_shots_buffer:
-                        best_shots_buffer[tid] = {'shots': [], 'last_seen': current_time}
-                    
-                    buffer = best_shots_buffer[tid]
-                    buffer['last_seen'] = current_time
-                    
-                    pad = 15
-                    crop = frame[max(0, y1-pad):min(fh, y2+pad), max(0, x1-pad):min(fw, x2+pad)].copy()
-                    
-                    # 상위 3개 관리 로직
-                    shots = buffer['shots']
-                    if len(shots) < 3:
-                        shots.append({'conf': conf, 'img': crop})
-                        shots.sort(key=lambda x: x['conf'], reverse=True)
-                    else:
-                        # 현재 3개 중 가장 낮은 점수보다 높으면 교체
-                        if conf > shots[-1]['conf']:
-                            shots[-1] = {'conf': conf, 'img': crop}
-                            shots.sort(key=lambda x: x['conf'], reverse=True)
+        # [Save Action]
+        if save_now:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19] # 밀리초 포함
+            for unit in cameras:
+                frame = current_frames.get(unit['name'])
+                if frame is not None and frame.shape[0] > 0:
+                    filename = f"{timestamp}.jpg"
+                    path = os.path.join(unit['save_dir'], filename)
+                    cv2.imwrite(path, frame)
+            total_saved += 4 # 4대 기준
+            # print(f"💾 저장 완료 ({total_saved}장 누적)")
 
-        # 화면에서 사라진 ID 처리
-        for tid in list(best_shots_buffer.keys()):
-            if current_time - best_shots_buffer[tid]['last_seen'] > 1.2: # 1.2초 대기
-                data = best_shots_buffer[tid]
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                
-                for i, shot in enumerate(data['shots']):
-                    rank = i + 1
-                    filename = f"crop_{timestamp}_ID{tid}_rank{rank}.jpg"
-                    file_path = os.path.join(output_dir, filename)
+        # 3. 화면 출력 (Grid)
+        # 4개면 2x2, 아니면 가로로 쭉
+        if len(frames_to_show) == 4:
+            top = np.hstack(frames_to_show[:2])
+            bot = np.hstack(frames_to_show[2:])
+            grid = np.vstack([top, bot])
+        else:
+            grid = np.hstack(frames_to_show)
 
-                    # 이미지 저장
-                    cv2.imwrite(file_path, shot['img'])
-                    
-                    # CSV 기록
-                    with open(csv_path, 'a', encoding='utf-8-sig', newline='') as f:
-                        writer = csv.writer(f)
-                        writer.writerow([filename, '', round(shot['conf'], 4), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), tid])
-                
-                print(f"📸 ID {tid}: 선명도 상위 {len(data['shots'])}장 저장 완료")
-                finalized_ids.add(tid)
-                del best_shots_buffer[tid]
+        # 상태 메시지
+        status = f"REC (Total: {total_saved})" if recording else f"IDLE (Total: {total_saved})"
+        cv2.putText(grid, status, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0,0,255) if recording else (255,255,255), 2)
+        
+        cv2.imshow("Data Collector", grid)
 
-        # 디버그 화면
-        display = cv2.resize(frame, (1280, 720))
-        cv2.putText(display, f"Active Tracks: {len(best_shots_buffer)} | Total: {len(finalized_ids)}", 
-                    (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.imshow("Best 3 Collector", display)
-        if cv2.waitKey(1) & 0xFF == ord('q'): break
+        # 키 조작
+        if key == ord('q'):
+            break
+        elif key == ord('r'):
+            recording = not recording
+            if recording:
+                print("🔴 연속 촬영 시작 (0.2s 간격)")
+            else:
+                print("⚪ 연속 촬영 중지")
 
-    cap.release()
+    # 종료
+    for unit in cameras:
+        unit['cam'].release()
     cv2.destroyAllWindows()
-    print(f"✅ 수집 종료. 총 {len(finalized_ids)}대의 데이터가 저장됨.")
+    print(f"👋 종료. 총 {total_saved}장 저장됨.")
 
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True, help="YOLO 모델 경로")
-    parser.add_argument("--source", type=str, required=True, help="영상 경로")
-    args = parser.parse_args()
-    run_collector(args.model, args.source)
+    main()

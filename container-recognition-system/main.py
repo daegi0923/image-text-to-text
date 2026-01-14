@@ -324,7 +324,15 @@ def main():
         display_frames = []
         
         for frame, unit in active_frames:
-            if frame is None: continue
+            # [수정] 프레임이 없으면(Sync로 인해 스킵됨) 마지막 화면 유지
+            if frame is None:
+                if unit['last_disp_frame'] is not None:
+                    display_frames.append(unit['last_disp_frame'])
+                else:
+                    # 초기 상태: 검은 화면 (640x360 예시)
+                    black = np.zeros((360, 640, 3), dtype=np.uint8)
+                    display_frames.append(resize_display(black))
+                continue
             
             disp = frame.copy()
             role = unit['role']
@@ -381,8 +389,7 @@ def main():
                                 session_manager.notify_trigger(ref_img_path)
                             
                             trigger_manager.activate(source_name=unit['name'])
-                            # 트리거 중에도 계속 갱신하고 싶으면 notify_trigger를 계속 호출해도 됨 (마지막 시점 갱신용)
-                            session_manager.notify_trigger(None)  # None을 보내면 시간만 갱신됨 (선택사항)
+                            session_manager.notify_trigger(None) 
 
                         # [Slave]
                         elif role == 'slave':
@@ -432,8 +439,11 @@ def main():
                 
                 for tid in to_remove:
                     del unit['buffer'][tid]
-
-            display_frames.append(resize_display(disp))
+            
+            # [수정] 화면 캐싱 및 리스트 추가
+            final_disp = resize_display(disp)
+            unit['last_disp_frame'] = final_disp
+            display_frames.append(final_disp)
 
         if display_frames:
             combined = np.hstack(display_frames)
