@@ -1,29 +1,42 @@
 system:
-  # 카메라별 설정 (소스 + 전용 모델)
   cameras:
-    - name: "side_view_back"
-      source: "data/raw_videos/gate_side2.mp4"
-      weights: "models/container_side/best.pt"
-      detection_zone: {x_min: 0.4, x_max: 0.6, y_min: 0.25, y_max: 0.75}
-      target_classes: [0] # 이 카메라는 0번 클래스만 봄
-      
-    - name: "top_view_front"
-      source: "data/raw_videos/gate_top1.mp4"
-      weights: "models/container_top/best.pt"
-      detection_zone: {x_min: 0.3, x_max: 0.7, y_min: 0.3, y_max: 1}
-      target_classes: [0] # 이 카메라는 0, 1번 둘 다 봄
-  
+    # --- [지휘관] Master Camera (Top View) ---
+    - name: "top_view"
+      role: "master"  # 이 친구가 트리거입니다
+      source: "rtsp://admin:Hello%402023@10.100.3.112:554/0/onvif/profile2/media.smp"
+      weights: "models/bpt_gate/best.pt"
+      # Top 뷰는 트럭이나 컨테이너 전체를 보고 타이밍을 잡습니다.
+      target_classes: [0, 1, 2] 
+      detection_zone: {x_min: 0.2, x_max: 0.8, y_min: 0.1, y_max: 0.9}
+
+    # --- [대기조] Slave Cameras (Side Views) ---
+    # 트리거가 발동되면 그때부터 Code Area(2)를 찾습니다.
+    - name: "side_view_1"
+      role: "slave"
+      source: "rtsp://admin:Hello%402023@10.100.3.111:554/0/onvif/profile2/media.smp"
+      weights: "models/bpt_gate/best.pt"
+      target_classes: [2] # 번호판(Code Area)만 집중 공략
+      detection_zone: {x_min: 0.2, x_max: 0.8, y_min: 0.2, y_max: 0.8}
+
+    - name: "side_view_2"
+      role: "slave"
+      source: "rtsp://admin:Hello%402023@10.100.3.113:554/0/onvif/profile2/media.smp"
+      weights: "models/bpt_gate/best.pt"
+      target_classes: [2]
+      detection_zone: {x_min: 0.2, x_max: 0.8, y_min: 0.2, y_max: 0.8}
+
+
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
 
 model:
   yolo_default: "yolo11n.pt"
   conf_threshold: 0.5
-  ocr_model: "paddle" # "Qwen/..." 대신 "paddle" 사용
-  target_classes: [0, 1]
+  ocr_model: "paddle" 
+  # 전체 라벨 정의: 0:Truck, 1:Container, 2:Code_Area
+  target_classes: [0, 1, 2]
 
 parameters:
-  cooldown_frames: 150
   perspective_intensity: 0.0
-  collection_window: 60
-
+  # Master가 감지 후 몇 초 동안 Slave를 켜둘지 설정
+  trigger_duration: 5.0

@@ -26,6 +26,7 @@ wheels/
 *.onnx
 
 # Data & Outputs (Local Only)
+data/
 data/raw_videos/
 data/frames/
 data/labels/
@@ -37,7 +38,7 @@ temp_frames/
 *.jpeg
 *.mp4
 *.csv
-
+yolo_dataset/
 # Logs
 *.log
 
