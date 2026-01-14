@@ -13,7 +13,7 @@ system:
     # 트리거가 발동되면 그때부터 Code Area(2)를 찾습니다.
     - name: "side_view_1"
       role: "slave"
-      source: "rtsp://admin:Hello%402023@10.100.3.111:554/0/onvif/profile2/media.smp"
+      source: "rtsp://admin:Hello%402023@10.100.3.113:554/0/onvif/profile2/media.smp"
       weights: "models/bpt_gate/best.pt"
       target_classes: [2] # 번호판(Code Area)만 집중 공략
       detection_zone: {x_min: 0.2, x_max: 0.8, y_min: 0.2, y_max: 0.8}

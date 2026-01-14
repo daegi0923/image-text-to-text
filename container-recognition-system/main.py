@@ -260,7 +260,8 @@ def main():
                     'targets': cam_conf.get('target_classes'), 
                     'buffer': {}, 
                     'fps': cam.fps, 'acc': 0.0,
-                    'frame_idx': 0 # 프레임 스킵용 카운터
+                    'frame_idx': 0,
+                    'last_disp_frame': None # [NEW] 화면 유지용 마지막 프레임
                 })
                 logger.info(f"🎥 [{role.upper()}] {name} 준비 완료")
             except Exception as e:
