@@ -353,14 +353,22 @@ def main():
             # --- [CORE LOGIC] ---
             should_detect = (role == 'master') or (role == 'slave' and trigger_active)
             
-            # [최적화] Slave는 3프레임마다 1번만 추론 (부하 감소)
+            # [최적화 1] 모든 카메라(Master 포함) 3프레임마다 1번만 추론
+            # 트럭은 빠르지 않으므로 30fps 감시는 자원 낭비임 (10fps면 충분)
             unit['frame_idx'] += 1
             SKIP_INTERVAL = 3 
-            if role == 'slave' and (unit['frame_idx'] % SKIP_INTERVAL != 0):
+            if unit['frame_idx'] % SKIP_INTERVAL != 0:
                 should_detect = False
 
             if should_detect:
-                results = unit['detector'].track(frame)
+                # [최적화 2] 추론용 리사이즈 (640px)
+                # 원본이 FHD면 YOLO 전처리가 오래 걸림 -> 미리 줄여서 던져줌
+                DETECT_W = 640
+                scale_factor = fw / DETECT_W
+                detect_h = int(fh / scale_factor)
+                small_frame = cv2.resize(frame, (DETECT_W, detect_h))
+
+                results = unit['detector'].track(small_frame)
                 
                 if results and results[0].boxes.id is not None:
                     boxes = results[0].boxes
@@ -369,8 +377,14 @@ def main():
                         
                         if unit['targets'] and cls_id not in unit['targets']:
                             continue
-                            
-                        x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                        
+                        # [좌표 복원] 작은 이미지 좌표 -> 원본 좌표
+                        s_x1, s_y1, s_x2, s_y2 = map(int, box.xyxy[0].cpu().numpy())
+                        x1 = int(s_x1 * scale_factor)
+                        y1 = int(s_y1 * scale_factor)
+                        x2 = int(s_x2 * scale_factor)
+                        y2 = int(s_y2 * scale_factor)
+
                         cx, cy = (x1+x2)//2, (y1+y2)//2
                         
                         # ROI 체크
