@@ -460,8 +460,15 @@ def main():
             display_frames.append(final_disp)
 
         if display_frames:
-            combined = np.hstack(display_frames)
-            status_text = f"SYSTEM: {"RECORDING" if trigger_active else "IDLE"}"
+            # 4대일 경우 2x2 격자로 배치
+            if len(display_frames) == 4:
+                top_row = np.hstack(display_frames[:2])
+                bot_row = np.hstack(display_frames[2:])
+                combined = np.vstack([top_row, bot_row])
+            else:
+                combined = np.hstack(display_frames)
+
+            status_text = f"SYSTEM: {'RECORDING' if trigger_active else 'IDLE'}"
             color = (0, 0, 255) if trigger_active else (0, 255, 0)
             cv2.putText(combined, status_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
             cv2.imshow('Container Recognition System', combined)
