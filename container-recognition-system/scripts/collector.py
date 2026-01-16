@@ -64,7 +64,7 @@ def main():
 
     recording = False
     last_record_time = 0
-    record_interval = 0.2 # 0.2초마다 저장 (너무 빠르면 중복 많음)
+    record_interval = 0.4 # 0.2초마다 저장 (너무 빠르면 중복 많음)
     total_saved = 0
 
     while True:
