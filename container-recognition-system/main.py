@@ -404,27 +404,50 @@ def main():
                             
                             trigger_manager.activate(source_name=unit['name'])
                             session_manager.notify_trigger(None) 
+                            
+                            # Master 감지 시각화
+                            cv2.rectangle(disp, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                            cv2.putText(disp, f"TRUCK {conf:.2f}", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                         # [Slave]
                         elif role == 'slave':
                             tid = int(track_id)
                             conf = float(box.conf[0])
                             
+                            # Slave 감지 시각화 (박스 + Conf)
+                            # 특히 Code Area(2)는 눈에 띄게 초록색으로!
+                            box_color = (0, 255, 0) if cls_id == 2 else (255, 255, 255)
+                            label = f"CODE {conf:.2f}" if cls_id == 2 else f"OBJ {conf:.2f}"
+                            cv2.rectangle(disp, (x1, y1), (x2, y2), box_color, 2)
+                            cv2.putText(disp, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
+
+                            # 오직 Code Area(2)인 경우만 OCR 대상
+                            if cls_id != 2:
+                                continue
+
                             if tid not in unit['buffer']:
                                 unit['buffer'][tid] = {'images': [], 'last_seen': 0, 'sent': False}
                             
                             buf = unit['buffer'][tid]
                             buf['last_seen'] = current_time
                             
-                            # 캡처 & 점수 계산
-                            pad = 10
+                            # 1. 캡처 (약간의 여유 공간 추가)
+                            pad = 15
                             crop = frame[max(0, y1-pad):min(fh, y2+pad), max(0, x1-pad):min(fw, x2+pad)]
-                            score = calculate_score(crop, conf, (x2-x1)*(y2-y1))
+                            
+                            # 2. [중요] OCR 전처리 및 원근 보정 복구
+                            # config에서 설정값 가져오기
+                            p_intensity = param_conf.get('perspective_intensity', 0.0)
+                            preprocessed = preprocess_for_ocr(crop)
+                            final_img = apply_perspective_correction(preprocessed, intensity=p_intensity)
+                            
+                            # 3. 점수 계산 (보정된 이미지 기준)
+                            score = calculate_score(final_img, conf, (x2-x1)*(y2-y1))
                             img_path = os.path.join(temp_dir, f"{unit['name']}_ID{tid}_{int(current_time*1000)}.jpg")
                             
                             # 버퍼 관리 (Top 5 유지)
                             if len(buf['images']) < 5: 
-                                cv2.imwrite(img_path, crop)
+                                cv2.imwrite(img_path, final_img)
                                 buf['images'].append({'path': img_path, 'score': score})
                             else:
                                 worst = min(buf['images'], key=lambda x: x['score'])
@@ -432,7 +455,7 @@ def main():
                                     try: os.remove(worst['path'])
                                     except: pass
                                     buf['images'].remove(worst)
-                                    cv2.imwrite(img_path, crop)
+                                    cv2.imwrite(img_path, final_img)
                                     buf['images'].append({'path': img_path, 'score': score})
 
             # Slave 큐 전송
