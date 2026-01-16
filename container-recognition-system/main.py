@@ -373,7 +373,10 @@ def main():
                 if results and results[0].boxes.id is not None:
                     boxes = results[0].boxes
                     for box, track_id in zip(boxes, boxes.id):
+                        # [변수 추출] 공통 사용을 위해 미리 뽑음
                         cls_id = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        tid = int(track_id)
                         
                         if unit['targets'] and cls_id not in unit['targets']:
                             continue
@@ -391,8 +394,6 @@ def main():
                         if not (zx1 < cx < zx2 and zy1 < cy < zy2):
                             continue
 
-                        cv2.rectangle(disp, (x1, y1), (x2, y2), zone_color, 2)
-                        
                         # [Master]
                         if role == 'master':
                             if not trigger_active:
@@ -411,8 +412,7 @@ def main():
 
                         # [Slave]
                         elif role == 'slave':
-                            tid = int(track_id)
-                            conf = float(box.conf[0])
+                            # tid, conf는 위에서 이미 정의됨
                             
                             # Slave 감지 시각화 (박스 + Conf)
                             # 특히 Code Area(2)는 눈에 띄게 초록색으로!
