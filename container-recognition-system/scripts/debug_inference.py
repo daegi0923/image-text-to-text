@@ -34,7 +34,8 @@ def run_debug():
         
         # 경로 보정 (상대 경로일 경우)
         if not os.path.isabs(source):
-            source = os.path.join(BASE_DIR, source)
+            # source = os.path.join(BASE_DIR, source)
+            pass
         if not os.path.isabs(weights):
             weights = os.path.join(BASE_DIR, weights)
 
@@ -42,9 +43,10 @@ def run_debug():
         print(f" - 소스: {source}")
         print(f" - 모델: {weights}")
 
-        if not os.path.exists(source):
-            print(f"⚠️ 소스 파일 없음, 건너뜀: {source}")
-            continue
+        # if not os.path.exists(source):
+        #     pass
+        #     print(f"⚠️ 소스 파일 없음, 건너뜀: {source}")
+        #     continue
             
         try:
             model = YOLO(weights)
