@@ -348,7 +348,7 @@ def main():
                          (0, 255, 0) if (role == 'slave' and trigger_active) else (100, 100, 100)
                 
             cv2.rectangle(disp, (zx1, zy1), (zx2, zy2), zone_color, 2)
-            cv2.putText(disp, f"{role.upper()}", (zx1, zy1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, zone_color, 2)
+            cv2.putText(disp, f"{role.upper()}", (zx1, zy1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, zone_color, 2)
 
             # --- [CORE LOGIC] ---
             should_detect = (role == 'master') or (role == 'slave' and trigger_active)
@@ -408,7 +408,7 @@ def main():
                             
                             # Master 감지 시각화
                             cv2.rectangle(disp, (x1, y1), (x2, y2), (0, 0, 255), 2)
-                            cv2.putText(disp, f"TRUCK {conf:.2f}", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                            cv2.putText(disp, f"TRUCK {conf:.2f}", (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
                         # [Slave]
                         elif role == 'slave':
@@ -419,7 +419,7 @@ def main():
                             box_color = (0, 255, 0) if cls_id == 2 else (255, 255, 255)
                             label = f"CODE {conf:.2f}" if cls_id == 2 else f"OBJ {conf:.2f}"
                             cv2.rectangle(disp, (x1, y1), (x2, y2), box_color, 2)
-                            cv2.putText(disp, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
+                            cv2.putText(disp, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, box_color, 2)
 
                             # 오직 Code Area(2)인 경우만 OCR 대상
                             if cls_id != 2:
@@ -493,7 +493,7 @@ def main():
 
             status_text = f"SYSTEM: {'RECORDING' if trigger_active else 'IDLE'}"
             color = (0, 0, 255) if trigger_active else (0, 255, 0)
-            cv2.putText(combined, status_text, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2)
+            cv2.putText(combined, status_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, color, 3)
             cv2.imshow('Container Recognition System', combined)
 
         if cv2.waitKey(1) & 0xFF == ord('q'): break
