@@ -66,7 +66,7 @@ def draw_yolo_results(frame, model, target_classes=None):
             elif cls_id == 1: color = (255, 0, 0)
             
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 2, color, 2)
             
     return annotated
 
