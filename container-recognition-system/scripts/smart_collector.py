@@ -85,8 +85,9 @@ def main():
     # [중복 방지] 마지막 저장 프레임 & 시간
     last_saved_master_frame = None
     last_save_time = 0
-    FORCE_SAVE_INTERVAL = 1.0 # 1초 지나면 강제 저장 (정차 중이라도)
-    MOTION_THRESHOLD = 500000 # 픽셀 차이 합계 (환경에 따라 조절 필요)
+    FORCE_SAVE_INTERVAL = 2.0 # 정차 시 2초마다 한 번씩은 생존신고
+    MOTION_THRESHOLD = 500000 
+    MIN_SAVE_INTERVAL = 0.5 # [NEW] 최소 0.5초 간격 (초당 2장 제한)
 
     print(">>> 감시 시작 (ROI 감지 대기 중) <<<")
 
@@ -155,39 +156,42 @@ def main():
         # 4. 저장 (중복 방지 로직 적용)
         if is_recording and current_session_dir:
             current_time = time.time()
-            should_save = False
             
-            # (A) 첫 프레임이면 무조건 저장
-            if last_saved_master_frame is None:
-                should_save = True
+            # [속도 제한]
+            if (current_time - last_save_time) < MIN_SAVE_INTERVAL:
+                pass 
             else:
-                # (B) 움직임 감지 (간단한 차분)
-                # 그레이스케일 변환 후 차이 계산이 빠름
-                prev_gray = cv2.cvtColor(last_saved_master_frame, cv2.COLOR_BGR2GRAY)
-                curr_gray = cv2.cvtColor(master_frame, cv2.COLOR_BGR2GRAY)
+                should_save = False
                 
-                # 리사이즈해서 비교 (속도 향상)
-                prev_small = cv2.resize(prev_gray, (320, 240))
-                curr_small = cv2.resize(curr_gray, (320, 240))
-                
-                diff = cv2.absdiff(prev_small, curr_small)
-                motion_score = np.sum(diff)
-                
-                # (C) 조건: 많이 움직였거나 OR 시간이 꽤 지났거나
-                if motion_score > MOTION_THRESHOLD:
+                # (A) 첫 프레임이면 무조건 저장
+                if last_saved_master_frame is None:
                     should_save = True
-                elif (current_time - last_save_time) > FORCE_SAVE_INTERVAL:
-                    should_save = True # 정차 중이라도 가끔 저장
+                else:
+                    # (B) 움직임 감지 (간단한 차분)
+                    prev_gray = cv2.cvtColor(last_saved_master_frame, cv2.COLOR_BGR2GRAY)
+                    curr_gray = cv2.cvtColor(master_frame, cv2.COLOR_BGR2GRAY)
+                    
+                    prev_small = cv2.resize(prev_gray, (320, 240))
+                    curr_small = cv2.resize(curr_gray, (320, 240))
+                    
+                    diff = cv2.absdiff(prev_small, curr_small)
+                    motion_score = np.sum(diff)
+                    
+                    # (C) 조건: 많이 움직였거나 OR 시간이 꽤 지났거나
+                    if motion_score > MOTION_THRESHOLD:
+                        should_save = True
+                    elif (current_time - last_save_time) > FORCE_SAVE_INTERVAL:
+                        should_save = True 
 
-            if should_save:
-                for unit in cameras:
-                    fname = f"{save_idx:04d}.jpg"
-                    path = os.path.join(current_session_dir, unit['name'], fname)
-                    cv2.imwrite(path, frames[unit['name']])
-                
-                save_idx += 1
-                last_saved_master_frame = master_frame.copy()
-                last_save_time = current_time
+                if should_save:
+                    for unit in cameras:
+                        fname = f"{save_idx:04d}.jpg"
+                        path = os.path.join(current_session_dir, unit['name'], fname)
+                        cv2.imwrite(path, frames[unit['name']])
+                    
+                    save_idx += 1
+                    last_saved_master_frame = master_frame.copy()
+                    last_save_time = current_time
         
         frame_count += 1
 
