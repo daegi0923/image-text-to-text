@@ -135,7 +135,9 @@ def main():
                 # [세션 시작]
                 is_recording = True
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                current_session_dir = os.path.join(base_save_path, f"TRUCK_{timestamp}")
+                # current_session_dir = os.path.join(base_save_path, f"TRUCK_{timestamp}")
+                current_session_dir = os.path.join(base_save_path,"")
+
                 os.makedirs(current_session_dir, exist_ok=True)
                 for c in cameras:
                     os.makedirs(os.path.join(current_session_dir, c['name']), exist_ok=True)
