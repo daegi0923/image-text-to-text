@@ -23,6 +23,7 @@ CLASS_MAP = {
 def convert_to_yolo_obb(item, img_w, img_h):
     """
     Label Studio 좌표 -> YOLO OBB 포맷 변환
+    수정: 회전 중심(Top-Left) 보정 적용으로 밀림 현상 해결
     """
     try:
         label_name = item['rectanglelabels'][0]
@@ -37,40 +38,26 @@ def convert_to_yolo_obb(item, img_w, img_h):
         w = item['width'] / 100.0
         h = item['height'] / 100.0
         r_deg = item.get('rotation', 0)
-
-        # 1. 중심점 계산 (Label Studio의 x,y는 회전 전 Top-Left 기준)
-        # 회전을 중심(cx, cy) 기준으로 한다면 중심점 좌표는 불변함.
-        cx = x + w / 2
-        cy = y + h / 2
         
-        # 2. 각도 변환 (Label Studio -> YOLO)
-        # Label Studio: 시계 방향이 양수(+)
-        # YOLO OBB: 보통 0~pi/2 범위를 쓰거나 버전에 따라 다름.
-        # 시각화했을 때 반대라면 부호를 뒤집어봐야 함.
-        # 일단 마이너스로 변경 시도
-        rotation_rad = math.radians(r_deg) 
+        # 라디안 변환
+        r_rad = math.radians(r_deg)
         
-        # NOTE: 만약 여전히 밀린다면, 
-        # Label Studio의 회전 중심이 (x, y) 즉 Top-Left일 수도 있음.
-        # 그럴 경우:
-        # real_cx = x + (w/2)*cos(r) - (h/2)*sin(r)
-        # real_cy = y + (w/2)*sin(r) + (h/2)*cos(r)
-        # 이런 식으로 삼각함수 보정이 필요함.
+        # [핵심 수정] 회전 중심 보정
+        # Label Studio의 (x, y)는 "회전 축(Pivot)"인 Top-Left 좌표임.
+        # 따라서 박스가 회전하면 중심점(Center)도 같이 돌아감.
         
-        # 일단 각도는 그대로 두고(양수), 만약 시각화에서 반대면 그때 뒤집자.
-        # (이전 시도에서 밀렸다고 했으니 중심점 보정 공식을 적용해봄)
+        # 회전 전의 중심점 오프셋 (Top-Left 기준)
+        ox = w / 2
+        oy = h / 2
         
-        # [가설 2] 회전 중심이 Top-Left(x,y)가 아니라, 
-        # Label Studio가 주는 x,y 자체가 회전된 박스의 어떤 지점일 수 있음.
+        # 회전 후의 중심점 좌표 계산 (Rotation Matrix 적용)
+        # cx = x + (ox * cos - oy * sin)
+        # cy = y + (ox * sin + oy * cos)
+        cx = x + (ox * math.cos(r_rad) - oy * math.sin(r_rad))
+        cy = y + (ox * math.sin(r_rad) + oy * math.cos(r_rad))
         
-        # 하지만 Label Studio 공식 문서는 "x, y, w, h are unrotated coordinates"라고 함.
-        # 그렇다면 cx, cy는 단순히 x + w/2가 맞음.
-        
-        # 그렇다면 문제는 'rotation'의 방향임.
-        # 한번 부호를 반대로 뒤집어서 저장해봄.
-        # rotation_rad = -math.radians(r_deg)
-        
-        return f"{cls_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {rotation_rad:.6f}"
+        # YOLO 포맷 반환
+        return f"{cls_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {r_rad:.6f}"
 
     except Exception as e:
         print(f"변환 에러: {e}")
