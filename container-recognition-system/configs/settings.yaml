@@ -38,6 +38,7 @@ system:
       weights: "models/bpt_gate/best.pt"
       target_classes: [2]
       detection_zone: {x_min: 0.3, x_max: 0.7, y_min: 0.4, y_max: 1}
+      has_detector: true
 
 
   log_file: "outputs/gate_log.csv"

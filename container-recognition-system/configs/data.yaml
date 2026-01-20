@@ -1,13 +1,13 @@
 # YOLO Dataset Configuration
 # Relative path from this file (configs/data.yaml) to the dataset folder
-path: ../data/dataset_multilabel
+path: ../data/dataset/bpt_gate_260120
 train: images/train
 val: images/val
 test:  # optional
 
 # Classes
 names:
-  0: container_body
+  0: truck
   1: container_code
   2: truck
   3: truck_code
