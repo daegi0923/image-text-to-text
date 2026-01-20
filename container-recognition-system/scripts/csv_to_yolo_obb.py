@@ -21,48 +21,48 @@ CLASS_MAP = {
 # ==========================================
 
 def convert_to_yolo_obb(item, img_w, img_h):
-    """
-    Label Studio 좌표 -> YOLO OBB 포맷 변환
-    수정: 회전 중심(Top-Left) 보정 적용으로 밀림 현상 해결
-    """
     try:
         label_name = item['rectanglelabels'][0]
         cls_id = CLASS_MAP.get(label_name)
         if cls_id is None:
             return None 
 
-        # Label Studio: x, y, width, height (0-100%)
-        # Rotation: 0-360 degrees (clockwise)
+        # Label Studio 값 (0-100 단위)
         x = item['x'] / 100.0
         y = item['y'] / 100.0
         w = item['width'] / 100.0
         h = item['height'] / 100.0
         r_deg = item.get('rotation', 0)
-        
-        # 라디안 변환
         r_rad = math.radians(r_deg)
         
-        # [핵심 수정] 회전 중심 보정
-        # Label Studio의 (x, y)는 "회전 축(Pivot)"인 Top-Left 좌표임.
-        # 따라서 박스가 회전하면 중심점(Center)도 같이 돌아감.
+        cos_a = math.cos(r_rad)
+        sin_a = math.sin(r_rad)
+
+        # 회전 전 4개 꼭짓점의 상대 좌표 (Pivot인 Top-Left 기준)
+        corners = [
+            (0, 0),      # Top-Left
+            (w, 0),      # Top-Right
+            (w, h),      # Bottom-Right
+            (0, h)       # Bottom-Left
+        ]
         
-        # 회전 전의 중심점 오프셋 (Top-Left 기준)
-        ox = w / 2
-        oy = h / 2
+        # 회전 변환 적용 후 절대 좌표 계산
+        new_points = []
+        for px, py in corners:
+            # 회전 행렬 적용
+            nx = x + (px * cos_a - py * sin_a)
+            ny = y + (px * sin_a + py * cos_a)
+            new_points.extend([f"{nx:.6f}", f"{ny:.6f}"])
         
-        # 회전 후의 중심점 좌표 계산 (Rotation Matrix 적용)
-        # cx = x + (ox * cos - oy * sin)
-        # cy = y + (ox * sin + oy * cos)
-        cx = x + (ox * math.cos(r_rad) - oy * math.sin(r_rad))
-        cy = y + (ox * math.sin(r_rad) + oy * math.cos(r_rad))
-        
-        # YOLO 포맷 반환
-        return f"{cls_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {r_rad:.6f}"
+        # 결과: class_id x1 y1 x2 y2 x3 y3 x4 y4
+        return f"{cls_id} " + " ".join(new_points)
 
     except Exception as e:
         print(f"변환 에러: {e}")
         return None
 
+
+        
 def main():
     if not os.path.exists(CSV_FILE):
         print(f"❌ CSV 파일 없음: {CSV_FILE}")
