@@ -8,8 +8,8 @@ import ast
 # ==========================================
 # [설정] 경로 및 클래스 매핑
 # ==========================================
-CSV_FILE = 'container-recognition-system/data/bpt_gate_260120.csv'  # CSV 파일 경로
-DATA_ROOT = 'container-recognition-system/data/dataset' # 실제 이미지가 있는 최상위 폴더
+CSV_FILE = '/data/bpt_gate_260120.csv'  # CSV 파일 경로
+DATA_ROOT = '/data/dataset' # 실제 이미지가 있는 최상위 폴더
 OUTPUT_DIR = 'container-recognition-system/yolo_dataset_obb' # 결과 저장될 폴더
 
 # 클래스 이름 -> ID 매핑 (settings.yaml과 맞춰야 함)
