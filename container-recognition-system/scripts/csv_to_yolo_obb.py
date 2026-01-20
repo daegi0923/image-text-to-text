@@ -23,45 +23,52 @@ CLASS_MAP = {
 def convert_to_yolo_obb(item, img_w, img_h):
     """
     Label Studio 좌표 -> YOLO OBB 포맷 변환
-    (class x_center y_center w h rotation_rad)
     """
     try:
         label_name = item['rectanglelabels'][0]
         cls_id = CLASS_MAP.get(label_name)
         if cls_id is None:
-            return None # 모르는 클래스는 패스
+            return None 
 
-        # Label Studio는 0~100 비율 사용
+        # Label Studio: x, y, width, height (0-100%)
+        # Rotation: 0-360 degrees (clockwise)
         x = item['x'] / 100.0
         y = item['y'] / 100.0
         w = item['width'] / 100.0
         h = item['height'] / 100.0
-        
-        # Label Studio의 (x, y)는 Top-Left가 아니라 Center일 수도 있고 Box의 기준점일 수도 있음.
-        # 보통 Label Studio 회전된 박스: (x, y)는 Top-Left, w, h, rotation(도)
-        # 하지만 회전 중심이 어디냐에 따라 계산이 복잡함.
-        # Label Studio의 'x', 'y'는 회전 전의 Top-Left 좌표일 확률이 높음.
-        
-        # 간단하게 Center 좌표로 변환 (회전 고려 X 근사치 - 정밀 변환 필요 시 공식 적용해야 함)
-        # YOLO OBB 포맷: x_center y_center width height rotation(rad)
-        # 일단 Label Studio JSON 값은 Center가 아니라 Top-Left 기준일 수 있으니 보정 필요.
-        # r = item['rotation'] 
-        # Label Studio 문서 기준: x, y is top-left of the bounding box (0-100)
-        
-        # 중심점 계산 (회전 없을 때 기준)
+        r_deg = item.get('rotation', 0)
+
+        # 1. 중심점 계산 (Label Studio의 x,y는 회전 전 Top-Left 기준)
+        # 회전을 중심(cx, cy) 기준으로 한다면 중심점 좌표는 불변함.
         cx = x + w / 2
         cy = y + h / 2
         
-        # 회전값: 도(Degree) -> 라디안(Radian)
-        # YOLO OBB는 -pi/2 ~ pi/2 범위를 주로 사용하거나 0~2pi 등 버전마다 다름.
-        # 여기선 일반적인 라디안 변환만 적용.
-        rotation_deg = item.get('rotation', 0)
-        rotation_rad = math.radians(rotation_deg)
-
-        # 정밀한 중심점 계산 (회전 적용)
-        # 회전 중심이 (x, y)라면 cx, cy가 이동해야 함.
-        # 하지만 Label Studio export 포맷마다 달라서, 일단 단순 Center로 변환.
-        # (필요시 시각화해서 틀어지면 수정해야 함)
+        # 2. 각도 변환 (Label Studio -> YOLO)
+        # Label Studio: 시계 방향이 양수(+)
+        # YOLO OBB: 보통 0~pi/2 범위를 쓰거나 버전에 따라 다름.
+        # 시각화했을 때 반대라면 부호를 뒤집어봐야 함.
+        # 일단 마이너스로 변경 시도
+        rotation_rad = math.radians(r_deg) 
+        
+        # NOTE: 만약 여전히 밀린다면, 
+        # Label Studio의 회전 중심이 (x, y) 즉 Top-Left일 수도 있음.
+        # 그럴 경우:
+        # real_cx = x + (w/2)*cos(r) - (h/2)*sin(r)
+        # real_cy = y + (w/2)*sin(r) + (h/2)*cos(r)
+        # 이런 식으로 삼각함수 보정이 필요함.
+        
+        # 일단 각도는 그대로 두고(양수), 만약 시각화에서 반대면 그때 뒤집자.
+        # (이전 시도에서 밀렸다고 했으니 중심점 보정 공식을 적용해봄)
+        
+        # [가설 2] 회전 중심이 Top-Left(x,y)가 아니라, 
+        # Label Studio가 주는 x,y 자체가 회전된 박스의 어떤 지점일 수 있음.
+        
+        # 하지만 Label Studio 공식 문서는 "x, y, w, h are unrotated coordinates"라고 함.
+        # 그렇다면 cx, cy는 단순히 x + w/2가 맞음.
+        
+        # 그렇다면 문제는 'rotation'의 방향임.
+        # 한번 부호를 반대로 뒤집어서 저장해봄.
+        # rotation_rad = -math.radians(r_deg)
         
         return f"{cls_id} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {rotation_rad:.6f}"
 
