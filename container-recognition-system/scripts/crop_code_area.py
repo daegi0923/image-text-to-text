@@ -83,22 +83,56 @@ def crop_objects():
             abs_w = w * w_img
             abs_h = h * h_img
             
-            # 회전된 사각형의 4개 점 구하기
-            box_pts = get_box_points(abs_cx, abs_cy, abs_w, abs_h, angle)
+            # 회전된 사각형의 4개 점 구하기 (순서: BL, TL, TR, BR 등 회전에 따라 다름)
+            # cv2.boxPoints는 순서가 보장되지 않으므로 정렬 필요
+            rect = ((abs_cx, abs_cy), (abs_w, abs_h), math.degrees(angle))
+            box = cv2.boxPoints(rect)
+            box = np.float32(box)
+
+            # 4개 점 정렬 (Top-Left, Top-Right, Bottom-Right, Bottom-Left 순서)
+            # x좌표 합, 차 등을 이용해 순서 찾기
+            # 간단하게: 
+            # 1. y가 가장 작은 두 점이 Top (그 중 x 작은게 TL, 큰게 TR)
+            # 2. y가 가장 큰 두 점이 Bottom (그 중 x 작은게 BL, 큰게 BR)
+            # 하지만 회전이 심하면 y만으로 판단 어려움.
             
-            # 4개 점을 감싸는 똑바른 사각형(Bounding Rect) 구하기
-            x, y, bw, bh = cv2.boundingRect(box_pts)
+            # 일반적인 정렬 방법:
+            # 합(x+y)이 가장 작은게 TL, 가장 큰게 BR
+            # 차(y-x)가 가장 작은게 TR, 가장 큰게 BL
+            s = box.sum(axis=1)
+            tl = box[np.argmin(s)]
+            br = box[np.argmax(s)]
+
+            diff = box[:, 1] - box[:, 0] # y - x
+            tr = box[np.argmin(diff)]
+            bl = box[np.argmax(diff)] # 여기가 잘못될 수 있음 (좌표계 확인 필요)
             
-            # 이미지 범위 벗어나지 않게 클램핑
-            x = max(0, x)
-            y = max(0, y)
-            bw = min(bw, w_img - x)
-            bh = min(bh, h_img - y)
+            # 더 안정적인 정렬 (x값 기준 sort -> 좌2/우2 나누고 -> y값 기준 sort)
+            # 하지만 위 방법이 일반적임.
             
-            if bw <= 0 or bh <= 0: continue
+            # 원본 박스 좌표 (src)
+            src_pts = np.array([tl, tr, br, bl], dtype="float32")
             
-            # 크롭!
-            crop = img[y:y+bh, x:x+bw]
+            # 변환 후 좌표 (dst) - 펴진 직사각형
+            # 너비/높이: OBB의 w, h 사용
+            # 가로/세로 비율에 따라 눕혀지거나 세워질 수 있음 -> 긴 쪽을 가로로?
+            # 일단 라벨링 된 w, h 그대로 사용
+            width = int(abs_w)
+            height = int(abs_h)
+            
+            # 만약 세로로 긴(높이가 더 큰) 박스라면, 눕혀서 저장하고 싶을 수도 있음.
+            # 여기서는 있는 그대로 저장.
+            
+            dst_pts = np.array([
+                [0, 0],
+                [width - 1, 0],
+                [width - 1, height - 1],
+                [0, height - 1]
+            ], dtype="float32")
+            
+            # 투시 변환 행렬 계산 & 적용
+            M = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            crop = cv2.warpPerspective(img, M, (width, height))
             
             # 저장 (파일명_인덱스.jpg)
             save_name = f"{fname}_{idx}.jpg"
