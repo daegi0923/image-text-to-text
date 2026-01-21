@@ -93,7 +93,7 @@ def main():
     cameras = []
     model_cache = {} # 같은 가중치 파일은 한 번만 로드
     
-    base_save_path = "/data/bpt_gate_auto_collect"
+    base_save_path = "data/bpt_gate_auto_collect"
     os.makedirs(base_save_path, exist_ok=True)
     
     # Master 찾기 및 나머지 설정
