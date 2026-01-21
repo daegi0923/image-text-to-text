@@ -8,6 +8,7 @@ system:
       # Top 뷰는 트럭이나 컨테이너 전체를 보고 타이밍을 잡습니다.
       target_classes: [0, 1, 2] 
       detection_zone: {x_min: 0.3, x_max: 0.7, y_min: 0.4, y_max: 1}
+      has_detector: true
 
     # --- [대기조] Slave Cameras (Side Views) ---
     # 트리거가 발동되면 그때부터 Code Area(2)를 찾습니다.

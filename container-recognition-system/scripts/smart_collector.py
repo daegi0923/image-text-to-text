@@ -37,7 +37,7 @@ def detect_simple(unit, frame, scale_width=640):
     small_frame = cv2.resize(frame, (scale_width, small_h))
     
     # 트럭(0), 컨테이너(1)
-    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[0, 1])
+    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[1])
     
     if results and len(results[0].boxes) > 0:
         return True
@@ -56,7 +56,7 @@ def detect_in_roi(unit, frame, scale_width=640):
     small_frame = cv2.resize(frame, (scale_width, small_h))
     
     # 트럭(0), 컨테이너(1)만 감지
-    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[0, 1])
+    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[1])
     
     detected = False
     boxes = []
