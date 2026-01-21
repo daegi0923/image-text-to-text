@@ -35,7 +35,7 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
         # 매칭되는 이미지 찾기 (jpg, png 등)
         img_found = None
         for ext in ['.jpg', '.jpeg', '.png']:
-            ip = image_path / (filename_parts[0] + '-' + base_name + ext)
+            ip = image_path / (base_name + ext)
             print(ip)
             if ip.exists():
                 img_found = ip
@@ -82,8 +82,8 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
 
 if __name__ == '__main__':
     # 기본 경로 설정 (프로젝트 루트 기준)
-    IMAGE_DIR = 'data/bpt_gate_1/images' 
-    LABEL_DIR = 'data/bpt_gate_1/labels'
+    IMAGE_DIR = 'data/yolo_dataset_obb/images' 
+    LABEL_DIR = 'data/yolo_dataset_obb/labels'
 
     current_time = datetime.now().strftime('%y%m%d_%H%M')
     DATASET_ROOT = f'data/dataset/dataset{current_time}'

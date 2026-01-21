@@ -1,6 +1,6 @@
 # YOLO Dataset Configuration
 # Relative path from this file (configs/data.yaml) to the dataset folder
-path: ../data/dataset/dataset_name
+path: ../data/dataset/dataset260121_1804
 train: images/train
 val: images/val
 test:  # optional
