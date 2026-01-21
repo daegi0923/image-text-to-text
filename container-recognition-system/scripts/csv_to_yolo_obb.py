@@ -4,6 +4,7 @@ import os
 import shutil
 import math
 import ast
+import numpy as np
 
 # ==========================================
 # [설정] 경로 및 클래스 매핑
@@ -39,30 +40,34 @@ def convert_to_yolo_obb(item, img_w, img_h):
         sin_a = math.sin(r_rad)
 
         # 회전 전 4개 꼭짓점의 상대 좌표 (Pivot인 Top-Left 기준)
-        corners = [
-            (0, 0),      # Top-Left
-            (w, 0),      # Top-Right
-            (w, h),      # Bottom-Right
-            (0, h)       # Bottom-Left
+        raw_corners = [
+            (x + (0 * cos_a - 0 * sin_a), y + (0 * sin_a + 0 * cos_a)), # TL
+            (x + (w * cos_a - 0 * sin_a), y + (w * sin_a + 0 * cos_a)), # TR
+            (x + (w * cos_a - h * sin_a), y + (w * sin_a + h * cos_a)), # BR
+            (x + (0 * cos_a - h * sin_a), y + (0 * sin_a + h * cos_a))  # BL
         ]
+
+        # 2. [중요] 점 정렬 (Sorting)
+        # y값이 가장 작은 점(가장 위)을 찾거나, 중심점 기준으로 각도 정렬
+        pts = np.array(raw_corners)
         
-        # 회전 변환 적용 후 절대 좌표 계산
-        new_points = []
-        for px, py in corners:
-            # 회전 행렬 적용
-            nx = x + (px * cos_a - py * sin_a)
-            ny = y + (px * sin_a + py * cos_a)
-            new_points.extend([f"{nx:.6f}", f"{ny:.6f}"])
+        # x+y가 가장 작은 점을 시작점으로 잡는 방식 (가장 좌상단)
+        sum_pts = pts.sum(axis=1)
+        start_idx = np.argmin(sum_pts)
         
-        # 결과: class_id x1 y1 x2 y2 x3 y3 x4 y4
-        return f"{cls_id} " + " ".join(new_points)
+        # 시작점부터 시계 방향으로 재배열
+        ordered_pts = np.roll(pts, -start_idx, axis=0)
+        
+        # 3. 8개 좌표 문자열 생성
+        formatted_coords = " ".join([f"{p:.6f}" for p in ordered_pts.flatten()])
+        return f"{cls_id} {formatted_coords}"
 
     except Exception as e:
         print(f"변환 에러: {e}")
         return None
 
 
-        
+
 def main():
     if not os.path.exists(CSV_FILE):
         print(f"❌ CSV 파일 없음: {CSV_FILE}")
