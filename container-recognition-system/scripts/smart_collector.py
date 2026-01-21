@@ -93,8 +93,21 @@ def main():
     cameras = []
     model_cache = {} # 같은 가중치 파일은 한 번만 로드
     
-    base_save_path = "data/bpt_gate_auto_collect"
-    os.makedirs(base_save_path, exist_ok=True)
+    # [Fix] 프로젝트 루트 기준 절대 경로 사용
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    base_save_path = os.path.join(project_root, "data/bpt_gate_auto_collect")
+    
+    try:
+        os.makedirs(base_save_path, exist_ok=True)
+        # 쓰기 권한 테스트
+        test_file = os.path.join(base_save_path, '.perm_test')
+        with open(test_file, 'w') as f: f.write('ok')
+        os.remove(test_file)
+        print(f"📂 저장 경로 확인: {base_save_path}")
+    except Exception as e:
+        print(f"🚨 [권한 오류] 저장 폴더에 접근할 수 없습니다: {e}")
+        print(f"👉 해결책: sudo chmod -R 777 {os.path.join(project_root, 'data')}")
+        return
     
     # Master 찾기 및 나머지 설정
     # 주의: 여기서 'role'이 master인 놈은 항상 감시, 
