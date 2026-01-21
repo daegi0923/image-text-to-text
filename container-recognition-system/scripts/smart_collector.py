@@ -160,7 +160,6 @@ def main():
     is_recording = False
     cooldown_counter = 0 
     COOLDOWN_FRAMES = 15 # 약 1~2초 여유
-    current_session_dir = None
     frame_count = 0
     save_idx = 0
     
@@ -216,10 +215,9 @@ def main():
                     # STOP
                     is_recording = False
                     print(f"💾 퇴장 확인! 녹화 종료. (Frames: {save_idx})")
-                    current_session_dir = None
 
-        # 4. 저장 로직 (이전과 동일)
-        if is_recording and current_session_dir:
+        # 4. 저장 로직
+        if is_recording:
             current_time = time.time()
             if (current_time - last_save_time) >= MIN_SAVE_INTERVAL:
                 should_save = False
@@ -246,8 +244,9 @@ def main():
                             is_target = detect_simple(unit, frames[unit['name']])
                         
                         if is_target:
-                            fname = f"{timestamp}_{save_idx:04d}.jpg"
-                            path = os.path.join(current_session_dir, unit['name'], fname)
+                            # [Fix] 폴더 생성 없이 base_save_path에 바로 저장 (파일이름에 카메라명 포함)
+                            fname = f"{unit['name']}_{timestamp}_{save_idx:04d}.jpg"
+                            path = os.path.join(base_save_path, fname)
                             cv2.imwrite(path, frames[unit['name']])
                             saved_count_in_batch += 1
                             
