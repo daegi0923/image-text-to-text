@@ -1,31 +1,21 @@
 import cv2
 import os
-import math
 import numpy as np
 from glob import glob
 
 # ==========================================
 # [설정] 데이터셋 경로
 # ==========================================
-DATASET_DIR = 'container-recognition-system/yolo_dataset_obb'
-OUTPUT_DIR = 'container-recognition-system/output_viz'
+DATASET_DIR = 'yolo_dataset'
+OUTPUT_DIR = 'output_viz'
 # ==========================================
-
-def get_box_points(cx, cy, w, h, angle_rad):
-    # 라디안 -> 도 (OpenCV용)
-    angle_deg = math.degrees(angle_rad)
-    # OpenCV: ((cx, cy), (w, h), angle_deg)
-    rect = ((cx, cy), (w, h), angle_deg)
-    box = cv2.boxPoints(rect)
-    box = np.intp(box)
-    return box
 
 def visualize():
     img_dir = os.path.join(DATASET_DIR, 'images')
     lbl_dir = os.path.join(DATASET_DIR, 'labels')
     
     if not os.path.exists(img_dir):
-        print("❌ 데이터셋 폴더 없음")
+        print(f"❌ 데이터셋 폴더 없음: {img_dir}")
         return
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -48,31 +38,31 @@ def visualize():
             
         for line in lines:
             parts = list(map(float, line.strip().split()))
-            # format: class cx cy w h rotation(rad)
+            # format: class x1 y1 x2 y2 x3 y3 x4 y4 (8 points)
+            if len(parts) < 9:
+                continue
+                
             cls_id = int(parts[0])
-            cx, cy, w, h, angle = parts[1], parts[2], parts[3], parts[4], parts[5]
+            coords = np.array(parts[1:]).reshape(-1, 2)
             
-            # 절대 좌표 변환
-            abs_cx = cx * w_img
-            abs_cy = cy * h_img
-            abs_w = w * w_img
-            abs_h = h * h_img
-            
-            # 박스 좌표 계산
-            box = get_box_points(abs_cx, abs_cy, abs_w, abs_h, angle)
+            # 정규화 좌표 -> 절대 좌표 변환
+            abs_coords = coords.copy()
+            abs_coords[:, 0] *= w_img
+            abs_coords[:, 1] *= h_img
+            box = abs_coords.astype(np.int32)
             
             # 그리기
             color = (0, 255, 0) # Green
-            if cls_id == 0: color = (0, 0, 255) # Truck (Red)
-            elif cls_id == 1: color = (255, 0, 0) # Container (Blue)
+            if cls_id == 0: color = (0, 0, 255) # Truck/Container (Red)
+            elif cls_id == 1: color = (255, 0, 0) # Blue
             
-            cv2.drawContours(img, [box], 0, color, 3)
+            cv2.polylines(img, [box], isClosed=True, color=color, thickness=3)
             
-            # 중심점 표시
-            cv2.circle(img, (int(abs_cx), int(abs_cy)), 5, (0, 255, 255), -1)
+            # 시작점 표시 (방향 확인용)
+            cv2.circle(img, tuple(box[0]), 5, (0, 255, 255), -1)
             
-            # 방향 표시 (첫 번째 점이랑 중심점 연결) -> 각도 확인용
-            cv2.line(img, (int(abs_cx), int(abs_cy)), tuple(box[0]), (255, 0, 255), 2)
+            # 클래스 ID 텍스트
+            cv2.putText(img, f"ID:{cls_id}", tuple(box[0]), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         # 저장
         cv2.imwrite(os.path.join(OUTPUT_DIR, f"viz_{fname}.jpg"), img)
