@@ -24,6 +24,25 @@ def resize_for_display(frame, width=480):
     h, w = frame.shape[:2]
     return cv2.resize(frame, (width, int(h * width / w)))
 
+def detect_simple(unit, frame, scale_width=640):
+    """
+    ROI와 상관없이 화면 전체에서 객체 감지 여부 반환 (저장 필터링용)
+    """
+    if 'model' not in unit:
+        return True # 모델이 없으면 필터링 불가 -> 일단 저장 (또는 정책에 따라 False)
+
+    h, w = frame.shape[:2]
+    scale = w / scale_width
+    small_h = int(h / scale)
+    small_frame = cv2.resize(frame, (scale_width, small_h))
+    
+    # 트럭(0), 컨테이너(1)
+    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[0, 1])
+    
+    if results and len(results[0].boxes) > 0:
+        return True
+    return False
+
 def detect_in_roi(unit, frame, scale_width=640):
     """
     특정 유닛의 ROI 내 객체 감지 여부 반환
@@ -74,7 +93,7 @@ def main():
     cameras = []
     model_cache = {} # 같은 가중치 파일은 한 번만 로드
     
-    base_save_path = "data/dataset/raw_captures"
+    base_save_path = "/data/bpt_gate_auto_collect"
     os.makedirs(base_save_path, exist_ok=True)
     
     # Master 찾기 및 나머지 설정
@@ -135,7 +154,7 @@ def main():
     if assist_units:
         print(f"🤝 보조 감시 카메라(Exit Monitor): {[u['name'] for u in assist_units]}")
     else:
-        print("ℹ️ 보조 감시 카메라 없음. Master 혼자 북치고 장구침.")
+        print("ℹ️ 보조 감시 카메라 없음.")
 
     # 상태 변수
     is_recording = False
@@ -187,9 +206,6 @@ def main():
                 # START
                 is_recording = True
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                current_session_dir = os.path.join(base_save_path, f"TRUCK_{timestamp}")
-                os.makedirs(current_session_dir, exist_ok=True)
-                for c in cameras: os.makedirs(os.path.join(current_session_dir, c['name']), exist_ok=True)
                 print(f"🎬 진입 감지! 녹화 시작 -> {timestamp}")
                 save_idx = 0
                 last_saved_master_frame = None
@@ -222,13 +238,23 @@ def main():
                     elif (current_time - last_save_time) > FORCE_SAVE_INTERVAL: should_save = True
 
                 if should_save:
+                    saved_count_in_batch = 0
                     for unit in cameras:
-                        fname = f"{timestamp}_{save_idx:04d}.jpg"
-                        path = os.path.join(current_session_dir, unit['name'], fname)
-                        cv2.imwrite(path, frames[unit['name']])
-                    save_idx += 1
-                    last_saved_master_frame = m_frame.copy()
-                    last_save_time = current_time
+                        # 저장 여부 판단: Detector가 있으면 객체 감지 시에만 저장
+                        is_target = True
+                        if unit['has_detector']:
+                            is_target = detect_simple(unit, frames[unit['name']])
+                        
+                        if is_target:
+                            fname = f"{timestamp}_{save_idx:04d}.jpg"
+                            path = os.path.join(current_session_dir, unit['name'], fname)
+                            cv2.imwrite(path, frames[unit['name']])
+                            saved_count_in_batch += 1
+                            
+                    if saved_count_in_batch > 0:
+                        save_idx += 1
+                        last_saved_master_frame = m_frame.copy()
+                        last_save_time = current_time
 
         frame_count += 1
 

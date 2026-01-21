@@ -2,8 +2,8 @@ from ultralytics import YOLO
 import os
 
 def train():
-    # 모델 로드 (OBB 전용 모델로 변경)
-    print("OBB 모델 로드 중...")
+    # 모델 로드
+    print("모델 로드 중...")
     model = YOLO("yolo11n-obb.pt")  
 
     # 데이터 설정 파일 경로

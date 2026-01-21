@@ -6,8 +6,8 @@ from glob import glob
 # ==========================================
 # [설정] 데이터셋 경로
 # ==========================================
-DATASET_DIR = 'yolo_dataset'
-OUTPUT_DIR = 'output_viz'
+DATASET_DIR = 'data/dataset/yolo_dataset_obb'
+OUTPUT_DIR = 'data/output_viz'
 # ==========================================
 
 def visualize():
@@ -55,7 +55,7 @@ def visualize():
             color = (0, 255, 0) # Green
             if cls_id == 0: color = (0, 0, 255) # Truck/Container (Red)
             elif cls_id == 1: color = (255, 0, 0) # Blue
-            
+            elif cls_id == 2: color = (0, 255, 255)
             cv2.polylines(img, [box], isClosed=True, color=color, thickness=3)
             
             # 시작점 표시 (방향 확인용)

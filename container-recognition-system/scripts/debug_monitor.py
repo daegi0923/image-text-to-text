@@ -124,7 +124,6 @@ def main():
     while True:
         display_list = []
         
-        # 병렬 처리 흉내 (순차 처리지만 리사이즈로 빠르게)
         for unit in units:
             frame = unit['cam'].get_frame()
             

@@ -2,6 +2,7 @@ import os
 import shutil
 import random
 from pathlib import Path
+from datetime import datetime
 
 def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, split_ratio=0.8):
     image_path = Path(image_dir)
@@ -51,9 +52,11 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
 
     print(f"총 {len(data_pairs)}개의 쌍이 매칭되었습니다.")
     
-    # [수정] 랜덤 셔플 제거하고 이름순(시간순)으로 정렬
-    # 파일명에 타임스탬프가 있으므로 정렬하면 시퀀셜하게 정렬됨
-    data_pairs.sort(key=lambda x: x[2]) 
+    #데이터 랜덤 셔플
+    random.shuffle(data_pairs)
+
+    # 랜덤 셔플 제거하고 이름순(시간순)으로 정렬
+    # data_pairs.sort(key=lambda x: x[2]) 
     
     split_idx = int(len(data_pairs) * split_ratio)
     train_data = data_pairs[:split_idx]
@@ -79,8 +82,10 @@ def organize_dataset_with_exported_labels(image_dir, label_dir, dataset_root, sp
 
 if __name__ == '__main__':
     # 기본 경로 설정 (프로젝트 루트 기준)
-    IMAGE_DIR = 'data/raw_data_multilabel/images' 
-    LABEL_DIR = 'data/raw_data_multilabel/labels'
-    DATASET_ROOT = 'data/dataset_multilabel'
+    IMAGE_DIR = 'data/bpt_gate_1/images' 
+    LABEL_DIR = 'data/bpt_gate_1/labels'
+
+    current_time = datetime.now().strftime('%y%m%d_%H%M')
+    DATASET_ROOT = f'data/dataset/dataset{current_time}'
     
     organize_dataset_with_exported_labels(IMAGE_DIR, LABEL_DIR, DATASET_ROOT)
