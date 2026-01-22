@@ -7,8 +7,8 @@ from glob import glob
 # ==========================================
 # [설정] 경로
 # ==========================================
-DATASET_DIR = 'container-recognition-system/yolo_dataset_obb'
-OUTPUT_DIR = 'container-recognition-system/yolo_dataset_obb/crops_code_area'
+DATASET_DIR = 'data/dataset/yolo_dataset_obb'
+OUTPUT_DIR = 'data/yolo_dataset_obb/crops_code_area'
 TARGET_CLASS_ID = 2 # CodeArea
 # ==========================================
 
@@ -73,66 +73,54 @@ def crop_objects():
             if cls_id != TARGET_CLASS_ID:
                 continue
                 
-            # OBB 좌표 (YOLO format: class cx cy w h angle)
-            # 좌표는 0~1 정규화된 값이라 가정 (YOLO 표준)
-            cx, cy, w, h, angle = parts[1], parts[2], parts[3], parts[4], parts[5]
-            
-            # 픽셀 좌표로 변환
-            abs_cx = cx * w_img
-            abs_cy = cy * h_img
-            abs_w = w * w_img
-            abs_h = h * h_img
-            
-            # 회전된 사각형의 4개 점 구하기 (순서: BL, TL, TR, BR 등 회전에 따라 다름)
-            # cv2.boxPoints는 순서가 보장되지 않으므로 정렬 필요
-            rect = ((abs_cx, abs_cy), (abs_w, abs_h), math.degrees(angle))
-            box = cv2.boxPoints(rect)
-            box = np.float32(box)
+            # [Fix] YOLO OBB 포맷: class x1 y1 x2 y2 x3 y3 x4 y4 (총 9개 값)
+            if len(parts) < 9:
+                continue
 
-            # 4개 점 정렬 (Top-Left, Top-Right, Bottom-Right, Bottom-Left 순서)
-            # x좌표 합, 차 등을 이용해 순서 찾기
-            # 간단하게: 
-            # 1. y가 가장 작은 두 점이 Top (그 중 x 작은게 TL, 큰게 TR)
-            # 2. y가 가장 큰 두 점이 Bottom (그 중 x 작은게 BL, 큰게 BR)
-            # 하지만 회전이 심하면 y만으로 판단 어려움.
+            # 좌표 정규화 해제 (0~1 -> 픽셀)
+            coords = np.array(parts[1:9], dtype=np.float32).reshape(4, 2)
+            coords[:, 0] *= w_img
+            coords[:, 1] *= h_img
             
-            # 일반적인 정렬 방법:
-            # 합(x+y)이 가장 작은게 TL, 가장 큰게 BR
-            # 차(y-x)가 가장 작은게 TR, 가장 큰게 BL
-            s = box.sum(axis=1)
-            tl = box[np.argmin(s)]
-            br = box[np.argmax(s)]
-
-            diff = box[:, 1] - box[:, 0] # y - x
-            tr = box[np.argmin(diff)]
-            bl = box[np.argmax(diff)] # 여기가 잘못될 수 있음 (좌표계 확인 필요)
+            # 4개 점 정렬 (Top-Left부터 시계 방향 or 그에 준하는 순서)
+            # 순서: TL, TR, BR, BL
+            # x값 기준 sort -> 좌2, 우2
+            # 좌2 중 y작은게 TL, 큰게 BL
+            # 우2 중 y작은게 TR, 큰게 BR
             
-            # 더 안정적인 정렬 (x값 기준 sort -> 좌2/우2 나누고 -> y값 기준 sort)
-            # 하지만 위 방법이 일반적임.
+            sorted_x = coords[np.argsort(coords[:, 0])]
+            left_pts = sorted_x[:2]
+            right_pts = sorted_x[2:]
             
-            # 원본 박스 좌표 (src)
+            tl = left_pts[np.argmin(left_pts[:, 1])]
+            bl = left_pts[np.argmax(left_pts[:, 1])]
+            tr = right_pts[np.argmin(right_pts[:, 1])]
+            br = right_pts[np.argmax(right_pts[:, 1])]
+            
             src_pts = np.array([tl, tr, br, bl], dtype="float32")
             
-            # 변환 후 좌표 (dst) - 펴진 직사각형
-            # 너비/높이: OBB의 w, h 사용
-            # 가로/세로 비율에 따라 눕혀지거나 세워질 수 있음 -> 긴 쪽을 가로로?
-            # 일단 라벨링 된 w, h 그대로 사용
-            width = int(abs_w)
-            height = int(abs_h)
+            # 변환 후 크기 계산 (직사각형으로 펴기)
+            # 상단/하단 너비 중 최대값
+            widthA = np.sqrt(((br[0] - bl[0]) ** 2) + ((br[1] - bl[1]) ** 2))
+            widthB = np.sqrt(((tr[0] - tl[0]) ** 2) + ((tr[1] - tl[1]) ** 2))
+            maxWidth = max(int(widthA), int(widthB))
             
-            # 만약 세로로 긴(높이가 더 큰) 박스라면, 눕혀서 저장하고 싶을 수도 있음.
-            # 여기서는 있는 그대로 저장.
+            # 좌측/우측 높이 중 최대값
+            heightA = np.sqrt(((tr[0] - br[0]) ** 2) + ((tr[1] - br[1]) ** 2))
+            heightB = np.sqrt(((tl[0] - bl[0]) ** 2) + ((tl[1] - bl[1]) ** 2))
+            maxHeight = max(int(heightA), int(heightB))
             
+            # 목표 좌표 (Top-Left -> Top-Right -> Bottom-Right -> Bottom-Left)
             dst_pts = np.array([
                 [0, 0],
-                [width - 1, 0],
-                [width - 1, height - 1],
-                [0, height - 1]
+                [maxWidth - 1, 0],
+                [maxWidth - 1, maxHeight - 1],
+                [0, maxHeight - 1]
             ], dtype="float32")
             
             # 투시 변환 행렬 계산 & 적용
             M = cv2.getPerspectiveTransform(src_pts, dst_pts)
-            crop = cv2.warpPerspective(img, M, (width, height))
+            crop = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
             
             # 저장 (파일명_인덱스.jpg)
             save_name = f"{fname}_{idx}.jpg"
