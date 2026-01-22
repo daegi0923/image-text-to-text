@@ -250,6 +250,11 @@ def main():
 
                 if should_save:
                     saved_count_in_batch = 0
+                    # [Add] 날짜별 폴더명 생성 (YYMMDD)
+                    date_folder = datetime.now().strftime("%y%m%d")
+                    date_dir = os.path.join(base_save_path, date_folder)
+                    os.makedirs(date_dir, exist_ok=True)
+
                     for unit in cameras:
                         # 저장 여부 판단: Detector가 있으면 객체 감지 시에만 저장
                         is_target = True
@@ -257,9 +262,9 @@ def main():
                             is_target = detect_simple(unit, frames[unit['name']])
                         
                         if is_target:
-                            # [Fix] 폴더 생성 없이 base_save_path에 바로 저장 (파일이름에 카메라명 포함)
-                            fname = f"{unit['name']}_{timestamp}_{save_idx:04d}.jpg"
-                            path = os.path.join(base_save_path, fname)
+                            # [Fix] 날짜 폴더(date_dir) 안에 저장
+                            fname = f"{timestamp}_{unit['name']}_{save_idx:04d}.jpg"
+                            path = os.path.join(date_dir, fname)
                             cv2.imwrite(path, frames[unit['name']])
                             saved_count_in_batch += 1
                             
