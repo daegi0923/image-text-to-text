@@ -37,7 +37,7 @@ def detect_simple(unit, frame, scale_width=640):
     small_frame = cv2.resize(frame, (scale_width, small_h))
     
     # 트럭(0), 컨테이너(1)
-    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[1])
+    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[2])
     
     if results and len(results[0].boxes) > 0:
         return True
@@ -181,7 +181,7 @@ def main():
     last_save_time = 0
     MIN_SAVE_INTERVAL = 0.5 
     FORCE_SAVE_INTERVAL = 2.0 
-    MOTION_THRESHOLD = 500000 
+    MOTION_THRESHOLD = 400000 
 
     print(">>> 시스템 가동 <<<")
 
