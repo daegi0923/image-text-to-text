@@ -29,23 +29,30 @@ def detect_simple(unit, frame, scale_width=640):
     ROI와 상관없이 화면 전체에서 객체 감지 여부 반환 (저장 필터링용)
     """
     if 'model' not in unit:
-        return True # 모델이 없으면 필터링 불가 -> 일단 저장 (또는 정책에 따라 False)
+        return True # 모델이 없으면 필터링 불가 -> 일단 저장
 
     h, w = frame.shape[:2]
     scale = w / scale_width
     small_h = int(h / scale)
     small_frame = cv2.resize(frame, (scale_width, small_h))
     
-    # 트럭(0), 컨테이너(1)
-    results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[2])
+    # OBB 모델 추론
+    results = unit['model'](small_frame, verbose=False, conf=0.4, classes=[2]) # CodeArea(2)
     
-    if results and len(results[0].boxes) > 0:
-        return True
+    if results:
+        r = results[0]
+        # OBB 우선 확인
+        if hasattr(r, 'obb') and r.obb is not None and len(r.obb) > 0:
+            return True
+        # 일반 Box 확인 (호환성)
+        elif hasattr(r, 'boxes') and r.boxes is not None and len(r.boxes) > 0:
+            return True
+            
     return False
 
 def detect_in_roi(unit, frame, scale_width=640):
     """
-    특정 유닛의 ROI 내 객체 감지 여부 반환
+    특정 유닛의 ROI 내 객체 감지 여부 반환 (OBB 지원)
     """
     if 'model' not in unit:
         return False, []
@@ -55,35 +62,67 @@ def detect_in_roi(unit, frame, scale_width=640):
     small_h = int(h / scale)
     small_frame = cv2.resize(frame, (scale_width, small_h))
     
-    # 트럭(0), 컨테이너(1)만 감지
+    # 트럭(0), 컨테이너(1) 등 트리거 대상 감지
+    # 트리거용 클래스는 상황에 맞게 설정 (보통 1=Container or 0=Truck)
+    # 여기선 1번(Container) 기준
     results = unit['model'](small_frame, verbose=False, conf=0.5, classes=[1])
     
     detected = False
-    boxes = []
+    viz_boxes = [] # 시각화용 (Poly or Rect)
 
     if results:
-        for box in results[0].boxes:
-            # 좌표 복원
-            x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
-            x1, x2 = int(x1 * scale), int(x2 * scale)
-            y1, y2 = int(y1 * scale), int(y2 * scale)
-            cx, cy = (x1+x2)//2, (y1+y2)//2
-            
-            # ROI 체크
-            z = unit['zone']
-            zx1, zx2 = int(w*z['x_min']), int(w*z['x_max'])
-            zy1, zy2 = int(h*z['y_min']), int(h*z['y_max'])
-            
-            if zx1 < cx < zx2 and zy1 < cy < zy2:
-                detected = True
-                boxes.append((x1, y1, x2, y2))
+        r = results[0]
+        scale_factor = scale_width / w # 역변환용 (small -> original)
+        # scale_width가 640이고 원본 w가 1920이면 scale_factor는 0.333
+        # 좌표는 small 기준이므로 original로 가려면 / scale_factor 하거나 * (w / 640)
+        
+        orig_scale = w / scale_width
+
+        # 1. OBB 처리
+        if hasattr(r, 'obb') and r.obb is not None:
+            for obb in r.obb:
+                # 좌표 복원 (xyxyxyxy -> 4 points)
+                s_pts = obb.xyxyxyxy[0].cpu().numpy()
+                pts = (s_pts * orig_scale).astype(np.int32)
                 
-    return detected, boxes
+                # 중심점 계산
+                cx = int(np.mean(pts[:, 0]))
+                cy = int(np.mean(pts[:, 1]))
+                
+                # ROI 체크
+                z = unit['zone']
+                zx1, zx2 = int(w*z['x_min']), int(w*z['x_max'])
+                zy1, zy2 = int(h*z['y_min']), int(h*z['y_max'])
+                
+                if zx1 < cx < zx2 and zy1 < cy < zy2:
+                    detected = True
+                    viz_boxes.append(pts) # Poly points
+
+        # 2. 일반 Box 처리 (OBB 없을 때)
+        elif hasattr(r, 'boxes') and r.boxes is not None:
+            for box in r.boxes:
+                s_x1, s_y1, s_x2, s_y2 = map(int, box.xyxy[0].cpu().numpy())
+                x1, x2 = int(s_x1 * orig_scale), int(s_x2 * orig_scale)
+                y1, y2 = int(s_y1 * orig_scale), int(s_y2 * orig_scale)
+                
+                cx, cy = (x1+x2)//2, (y1+y2)//2
+                
+                z = unit['zone']
+                zx1, zx2 = int(w*z['x_min']), int(w*z['x_max'])
+                zy1, zy2 = int(h*z['y_min']), int(h*z['y_max'])
+                
+                if zx1 < cx < zx2 and zy1 < cy < zy2:
+                    detected = True
+                    # 사각형을 4개 점 포맷으로 변환 (호환성)
+                    rect_pts = np.array([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.int32)
+                    viz_boxes.append(rect_pts)
+                
+    return detected, viz_boxes
 
 def main():
-    print("=== 📸 [스마트] 트럭 자동 수집기 (Dual-Check) ===")
+    print("=== 📸 [스마트] 트럭 자동 수집기 (OBB Ready) ===")
     print("Front가 잡으면 시작 -> Back이 놓아주면 종료")
-    print("메모리 최적화: 모델 캐싱 + 조건부 추론")
+    print("OBB 모델 지원 및 CodeArea(2) 필터링 저장")
     print("종료: Q")
 
     config = load_config()
@@ -284,10 +323,13 @@ def main():
         
         color = (0, 0, 255) if is_recording else (0, 255, 0)
         cv2.rectangle(disp, (zx1, zy1), (zx2, zy2), color, 3)
-        for bx in master_viz_boxes:
-            cv2.rectangle(disp, (bx[0], bx[1]), (bx[2], bx[3]), (0, 255, 255), 2)
+        
+        # [Fix] OBB 시각화 (Poly)
+        if master_viz_boxes:
+            cv2.polylines(disp, master_viz_boxes, isClosed=True, color=(0, 255, 255), thickness=2)
             
         txt = f"REC (Back: {len(assist_units)})" if is_recording else "WAIT"
+        cv2.putText(disp, txt, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
         cv2.putText(disp, txt, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
         cv2.putText(disp, f"Saved: {save_idx}", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255,255,255), 2)
         
