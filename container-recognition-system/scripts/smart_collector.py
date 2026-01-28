@@ -218,7 +218,7 @@ def main():
     # 중복 방지 변수
     last_saved_master_frame = None
     last_save_time = 0
-    MIN_SAVE_INTERVAL = 0.5 
+    MIN_SAVE_INTERVAL = 0.2
     FORCE_SAVE_INTERVAL = 2.0 
     MOTION_THRESHOLD = 400000 
 
