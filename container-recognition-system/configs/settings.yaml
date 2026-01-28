@@ -42,6 +42,15 @@ system:
       has_detector: true
 
 
+    - name: "license_plate"
+      role: "slave"
+      source: "rtsp://admin:Hello%402023@10.100.3.133:554/0/onvif/profile2/media.smp"
+      weights: "models/bpt_gate_obb_v1/best.pt"
+      target_classes: [0]
+      detection_zone: {x_min: 0.2, x_max: 1, y_min: 0.4, y_max: 1}
+      has_detector: true
+
+
   log_file: "outputs/gate_log.csv"
   temp_frame_dir: "temp_frames"
 
