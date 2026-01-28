@@ -303,7 +303,10 @@ def main():
                         if is_target:
                             # [Fix] 날짜 폴더(date_dir) 안에 저장
                             fname = f"{timestamp}_{save_idx:04d}_{unit['name']}.jpg"
-                            path = os.path.join(date_dir, fname)
+                            if unit['name'] == 'license_plate':
+                                path = os.path.join(date_dir, 'license_plate',fname)
+                            else:
+                                path = os.path.join(date_dir, fname)
                             cv2.imwrite(path, frames[unit['name']])
                             saved_count_in_batch += 1
                             
