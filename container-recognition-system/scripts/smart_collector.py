@@ -292,7 +292,9 @@ def main():
                     # [Add] 날짜별 폴더명 생성 (YYMMDD)
                     date_folder = datetime.now().strftime("%y%m%d")
                     date_dir = os.path.join(base_save_path, date_folder)
+                    plate_dir = os.path.join(base_save_path, date_folder, 'plate')
                     os.makedirs(date_dir, exist_ok=True)
+                    os.makedirs(plate_dir, exist_ok=True)
 
                     for unit in cameras:
                         # 저장 여부 판단: Detector가 있으면 객체 감지 시에만 저장
@@ -304,7 +306,7 @@ def main():
                             # [Fix] 날짜 폴더(date_dir) 안에 저장
                             fname = f"{timestamp}_{save_idx:04d}_{unit['name']}.jpg"
                             if unit['name'] == 'license_plate':
-                                path = os.path.join(date_dir, 'license_plate',fname)
+                                path = os.path.join(date_dir, 'plate',fname)
                             else:
                                 path = os.path.join(date_dir, fname)
                             cv2.imwrite(path, frames[unit['name']])
